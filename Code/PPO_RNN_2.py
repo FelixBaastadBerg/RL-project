@@ -514,7 +514,6 @@ class PPOAgent:
     def plot_rewards(self):
         plt.figure(figsize=(12, 6))
         plt.plot(self.all_rewards)
-        plt.title('Average Reward per Update')
         plt.xlabel('Update')
         plt.ylabel('Average Reward')
         plt.grid()
@@ -640,6 +639,6 @@ class PPOAgent:
 
 
 if __name__ == "__main__":
-    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=10, hidden_size=128,
-                     grid_size=20, view_size=5, max_hunger=100, num_trees=1, num_predators=1, results_path=None)
+    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=500, hidden_size=256,
+                     grid_size=100, view_size=5, max_hunger=100)
     agent.train()
