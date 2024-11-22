@@ -640,5 +640,5 @@ class PPOAgent:
 
 if __name__ == "__main__":
     agent = PPOAgent(num_envs=100, num_steps=128, num_updates=500, hidden_size=256,
-                     grid_size=100, view_size=5, max_hunger=100)
+                     grid_size=100, view_size=5, max_hunger=100, num_trees=1, num_predators=1, results_path=None)
     agent.train()
