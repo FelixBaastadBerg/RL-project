@@ -466,7 +466,7 @@ class PPOAgent:
         return advantages, returns
 
     def update_policy(self, obs_batch, actions_batch, log_probs_old_batch,
-                      returns_batch, advantages_batch, hxs_batch, cxs_batch):
+                    returns_batch, advantages_batch, hxs_batch, cxs_batch, old_values_batch):
         # Normalize advantages
         advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
 
@@ -487,6 +487,7 @@ class PPOAgent:
             advantages_mb = advantages_batch[mb_indices].to(self.device)
             hxs_mb = hxs_batch[mb_indices].unsqueeze(0).to(self.device)  # Add num_layers dimension
             cxs_mb = cxs_batch[mb_indices].unsqueeze(0).to(self.device)
+            old_values_mb = old_values_batch[mb_indices].to(self.device)
 
             # Forward pass with LSTM hidden states
             policy_logits, value, _ = self.policy(obs_mb, hxs_mb, cxs_mb)
@@ -499,7 +500,13 @@ class PPOAgent:
             surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * advantages_mb
             actor_loss = -torch.min(surr1, surr2).mean()
 
-            value_loss = F.mse_loss(value, returns_mb)
+            # Clipped value function
+            value_pred = value.squeeze(-1)
+            value_pred_clipped = old_values_mb + (value_pred - old_values_mb).clamp(-self.clip_epsilon, self.clip_epsilon)
+            value_loss_unclipped = (value_pred - returns_mb).pow(2)
+            value_loss_clipped = (value_pred_clipped - returns_mb).pow(2)
+            value_loss = 0.5 * torch.max(value_loss_unclipped, value_loss_clipped).mean()
+
             loss = actor_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy
 
             self.optimizer.zero_grad()
@@ -509,13 +516,14 @@ class PPOAgent:
 
         return loss.item(), actor_loss, value_loss, entropy
 
+
     def train(self):
         for update in range(self.num_updates):
             # Set track_positions=True during the last rollout
             track_positions = (update == self.num_updates - 1)
 
             (obs_list, actions_list, log_probs_list, values_list,
-             rewards_list, dones_list, next_value, hxs_list, cxs_list) = self.collect_rollouts(track_positions=track_positions)
+            rewards_list, dones_list, next_value, hxs_list, cxs_list) = self.collect_rollouts(track_positions=track_positions)
 
             advantages, returns = self.compute_gae(rewards_list, values_list, dones_list, next_value)
 
@@ -527,9 +535,14 @@ class PPOAgent:
             advantages_batch = advantages.view(-1)
             hxs_batch = torch.stack(hxs_list).view(-1, self.hidden_size)
             cxs_batch = torch.stack(cxs_list).view(-1, self.hidden_size)
+            old_values_batch = torch.stack(values_list).view(-1)  # Flatten old values
 
-            loss, actor_loss, value_loss, entropy = self.update_policy(obs_batch, actions_batch, log_probs_old_batch,
-                                      returns_batch, advantages_batch, hxs_batch, cxs_batch)
+            # Ensure old_values are detached from the computation graph
+            old_values_batch = old_values_batch.detach()
+
+            loss, actor_loss, value_loss, entropy = self.update_policy(
+                obs_batch, actions_batch, log_probs_old_batch,
+                returns_batch, advantages_batch, hxs_batch, cxs_batch, old_values_batch)
 
             # Tracking average reward
             avg_reward = torch.stack(rewards_list).sum(0).mean().item()
