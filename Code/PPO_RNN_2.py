@@ -18,10 +18,12 @@ class GridWorldEnv:
     AGENT = 4  # Added for visualization
     APPLE_TREE = 5  # New constant for apple tree tiles
 
-    def __init__(self, grid_size=20, view_size=5, max_hunger=100):
+    def __init__(self, grid_size=20, view_size=5, max_hunger=100, num_predators=1, num_trees=1):
         self.grid_size = grid_size
         self.view_size = view_size
         self.max_hunger = max_hunger
+        self.num_predators = num_predators
+        self.num_trees = num_trees
         self.reset()
 
     def reset(self):
@@ -30,18 +32,36 @@ class GridWorldEnv:
         self.grid[0, :] = self.grid[-1, :] = self.grid[:, 0] = self.grid[:, -1] = self.WALL
 
         # Generate the apple tree
+        # max_tree_start = self.grid_size - 5 - 1  # -1 to account for the walls
+        # tree_x = np.random.randint(1, max_tree_start + 1)
+        # tree_y = np.random.randint(1, max_tree_start + 1)
+        # self.apple_tree_positions = []
+        # for i in range(tree_x, tree_x + 5):
+        #     for j in range(tree_y, tree_y + 5):
+        #         self.apple_tree_positions.append((i, j))
+        #         self.grid[i, j] = self.APPLE_TREE  # Mark the apple tree on the grid
+
+        # Generate multiple apple trees
         max_tree_start = self.grid_size - 5 - 1  # -1 to account for the walls
-        tree_x = np.random.randint(1, max_tree_start + 1)
-        tree_y = np.random.randint(1, max_tree_start + 1)
-        self.apple_tree_positions = []
-        for i in range(tree_x, tree_x + 5):
-            for j in range(tree_y, tree_y + 5):
-                self.apple_tree_positions.append((i, j))
-                self.grid[i, j] = self.APPLE_TREE  # Mark the apple tree on the grid
+        self.apple_trees = []
+        for _ in range(self.num_trees):
+            overlap = True
+            while overlap:
+                tree_x = np.random.randint(1, max_tree_start + 1)
+                tree_y = np.random.randint(1, max_tree_start + 1)
+                apple_tree_positions = []
+                for i in range(tree_x, tree_x + 5):
+                    for j in range(tree_y, tree_y + 5):
+                        apple_tree_positions.append((i, j))
+                overlap = any(pos in self.apple_trees for pos in apple_tree_positions)
+            self.apple_trees.append(apple_tree_positions)
+            for pos in apple_tree_positions:
+                self.grid[pos[0], pos[1]] = self.APPLE_TREE
 
         # Remove apple tree positions from empty cells
         empty_cells = np.argwhere(self.grid == self.EMPTY)
-        apple_tree_set = set(self.apple_tree_positions)
+        # apple_tree_set = set(self.apple_tree_positions)
+        apple_tree_set = set(pos for tree in self.apple_trees for pos in tree)
         empty_cells = [cell for cell in empty_cells if tuple(cell) not in apple_tree_set]
         empty_cells = np.array(empty_cells)
 
@@ -54,8 +74,7 @@ class GridWorldEnv:
         # Place predators
         self.predator_positions = []
         self.predator_underlying_cells = []  # New list to store underlying cells
-        num_predators = 1  # Adjust the number of predators as needed
-        for _ in range(num_predators):
+        for _ in range(self.num_predators):
             if len(empty_cells) > 0:
                 predator_pos = empty_cells[np.random.choice(len(empty_cells))]
                 self.predator_positions.append(predator_pos)
@@ -70,7 +89,8 @@ class GridWorldEnv:
         # Place an apple randomly within the apple tree
         # Ensure the apple doesn't spawn on the agent or predators
         occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
-        available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
+        # available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
+        available_apple_positions = [pos for tree in self.apple_trees for pos in tree if pos not in occupied_positions]
         if available_apple_positions:
             self.apple_pos = available_apple_positions[np.random.choice(len(available_apple_positions))]
             self.grid[self.apple_pos[0], self.apple_pos[1]] = self.APPLE
@@ -105,7 +125,8 @@ class GridWorldEnv:
 
             # Place a new apple within the apple tree
             occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
-            available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
+            # available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
+            available_apple_positions = [pos for tree in self.apple_trees for pos in tree if pos not in occupied_positions]
             if available_apple_positions:
                 self.apple_pos = available_apple_positions[np.random.choice(len(available_apple_positions))]
                 self.grid[self.apple_pos[0], self.apple_pos[1]] = self.APPLE
@@ -269,13 +290,17 @@ class PolicyValueNetwork(nn.Module):
         return policy_logits, value.squeeze(-1), (hx, cx)
 
 class PPOAgent:
-    def __init__(self, num_envs=100, num_steps=128, num_updates=2000, hidden_size = 128, grid_size=20, view_size=5, max_hunger=100):
+    def __init__(self, num_envs=100, num_steps=128, num_updates=2000, hidden_size = 128, grid_size=20, view_size=5, max_hunger=100, num_trees=1, num_predators=1, results_path=None):
+        self.config_string = f"envs_{num_envs}-steps_{num_steps}-updates_{num_updates}-hidden_{hidden_size}-grid_{grid_size}-view_{view_size}-hunger_{max_hunger}-trees_{num_trees}-predators_{num_predators}"
+
         self.num_envs = num_envs
         self.num_steps = num_steps
         self.num_updates = num_updates
         self.grid_size = grid_size
         self.view_size = view_size
         self.max_hunger = max_hunger
+        self.num_trees = num_trees
+        self.num_predators = num_predators
 
         self.gamma = 0.99
         self.gae_lambda = 0.95
@@ -286,7 +311,7 @@ class PPOAgent:
         self.learning_rate = 2.5e-4
         self.eps = 1e-5
 
-        self.envs = [GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger) for _ in range(num_envs)]
+        self.envs = [GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger, num_predators=self.num_predators, num_trees=self.num_trees) for _ in range(num_envs)]
         self.input_size = 24  # 5x5 grid minus the agent's own position
         self.num_actions = 4
         self.hidden_size = hidden_size  # Hidden size for LSTM
@@ -298,6 +323,8 @@ class PPOAgent:
         self.all_rewards = []
         self.agent_positions = []  # To track positions of the first agent
         self.apple_positions = []  # To track positions of the apple
+
+        self.results_path = results_path
 
         # Initialize LSTM hidden states (num_layers=1)
         self.hx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
@@ -473,12 +500,16 @@ class PPOAgent:
 
 
         print("Training completed!")
-        self.plot_rewards()
-        self.plot_agent_positions()  # Plot the agent's positions
-        # Save the trained model
-        torch.save(self.policy.state_dict(), 'trained_policy.pth')
-        # Run the test environment
-        self.test_trained_model()
+        if self.results_path:
+            torch.save(self.policy.state_dict(), f'{self.results_path}/{self.config_string}.pth')
+        else:
+            self.plot_rewards()
+            self.plot_agent_positions()  # Plot the agent's positions
+            # Save the trained model
+            torch.save(self.policy.state_dict(), 'trained_policy.pth')
+            # Run the test environment
+            self.test_trained_model()
+
 
     def plot_rewards(self):
         plt.figure(figsize=(12, 6))
@@ -514,7 +545,8 @@ class PPOAgent:
             plt.scatter(apple_x_positions, apple_y_positions, c=apple_timesteps, cmap='cool', marker='x', label='Apple')
 
         # Plot the apple tree positions
-        apple_tree_positions = np.array(self.envs[0].apple_tree_positions)
+        # apple_tree_positions = np.array(self.envs[0].apple_tree_positions)
+        apple_tree_positions = np.array([pos for tree in self.envs[0].apple_trees for pos in tree])
         if len(apple_tree_positions) > 0:
             plt.scatter(apple_tree_positions[:, 1], apple_tree_positions[:, 0], color='brown', marker='s', label='Apple Tree')
 
@@ -531,7 +563,7 @@ class PPOAgent:
 
     def test_trained_model(self):
         # Initialize a new environment
-        test_env = GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger)
+        test_env = GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger, num_predators=self.num_predators, num_trees=self.num_trees)
         obs = test_env.reset()
         obs = torch.tensor(obs, device=self.device).unsqueeze(0)
         hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
@@ -608,6 +640,6 @@ class PPOAgent:
 
 
 if __name__ == "__main__":
-    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=20, hidden_size=128,
-                     grid_size=20, view_size=5, max_hunger=100)
+    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=10, hidden_size=128,
+                     grid_size=20, view_size=5, max_hunger=100, num_trees=1, num_predators=1, results_path=None)
     agent.train()
