@@ -44,8 +44,10 @@ class GridWorldEnv:
         # Generate multiple apple trees
         max_tree_start = self.grid_size - 5 - 1  # -1 to account for the walls
         self.apple_trees = []
+        occupied_positions = set()
         for _ in range(self.num_trees):
             overlap = True
+            attempts = 0
             while overlap:
                 tree_x = np.random.randint(1, max_tree_start + 1)
                 tree_y = np.random.randint(1, max_tree_start + 1)
@@ -53,7 +55,14 @@ class GridWorldEnv:
                 for i in range(tree_x, tree_x + 5):
                     for j in range(tree_y, tree_y + 5):
                         apple_tree_positions.append((i, j))
-                overlap = any(pos in self.apple_trees for pos in apple_tree_positions)
+                overlap = any(pos in occupied_positions for pos in apple_tree_positions)
+                attempts += 1
+                if attempts > 100:  # Prevent infinite loops
+                    print("Could not place all apple trees without overlap.")
+                    break
+            if attempts > 100:
+                break
+            occupied_positions.update(apple_tree_positions)
             self.apple_trees.append(apple_tree_positions)
             for pos in apple_tree_positions:
                 self.grid[pos[0], pos[1]] = self.APPLE_TREE
@@ -89,6 +98,12 @@ class GridWorldEnv:
         # Place an apple randomly within the apple tree
         # Ensure the apple doesn't spawn on the agent or predators
         occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
+
+        self.apple_timer = 0
+        self.apple_positions = []
+        self.generate_apples()
+
+
         # available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
         available_apple_positions = [pos for tree in self.apple_trees for pos in tree if pos not in occupied_positions]
         if available_apple_positions:
@@ -101,6 +116,16 @@ class GridWorldEnv:
         self.done = False
         self.steps = 0
         return self._get_observation()
+    
+    def generate_apples(self):
+        occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
+        for tree in self.apple_trees:
+            # Exclude positions occupied by agent or predators
+            available_positions = [pos for pos in tree if pos not in occupied_positions]
+            if available_positions:
+                apple_pos = random.choice(available_positions)
+                self.apple_positions.append(apple_pos)
+                self.grid[apple_pos[0], apple_pos[1]] = self.APPLE
 
     def step(self, action):
         if self.done:
@@ -118,6 +143,15 @@ class GridWorldEnv:
             self.agent_pos = next_pos
 
         # Check for apple consumption
+        #print(tuple(self.agent_pos))
+        #print(self.apple_positions)
+        if tuple(self.agent_pos) in self.apple_positions:
+            reward = 1
+            self.hunger = 0
+            self.grid[self.agent_pos[0], self.agent_pos[1]] = self.APPLE_TREE
+        else: 
+            self.hunger += 1
+        """
         if self.apple_pos is not None and np.array_equal(self.agent_pos, self.apple_pos):
             reward = 1  # Reward for eating an apple
             self.hunger = 0  # Reset hunger
@@ -134,10 +168,11 @@ class GridWorldEnv:
                 self.apple_pos = None  # No available position in the apple tree
         else:
             self.hunger += 1
+        """
 
         # Check if the agent dies due to hunger
         if self.hunger >= self.max_hunger:
-            reward = -1  # Negative reward for dying
+            reward = -10  # Negative reward for dying
             self.done = True
 
         # Move predators (if any)
@@ -203,7 +238,7 @@ class GridWorldEnv:
         for pos in self.predator_positions:
             if np.array_equal(pos, self.agent_pos):
                 # Predator is at the same position as the agent
-                reward = -1  # Negative reward similar to dying of hunger
+                reward = -10  # Negative reward similar to dying of hunger
                 self.done = True
                 break
             else:
@@ -218,6 +253,12 @@ class GridWorldEnv:
         if self.done:
             obs = self._get_observation()
             return obs, reward, self.done
+
+        # Increment apple timer and generate apples if needed
+        self.apple_timer += 1
+        if self.apple_timer >= 20:
+            self.generate_apples()
+            self.apple_timer = 0
 
         self.steps += 1
         obs = self._get_observation()
@@ -640,5 +681,5 @@ class PPOAgent:
 
 if __name__ == "__main__":
     agent = PPOAgent(num_envs=100, num_steps=128, num_updates=500, hidden_size=256,
-                     grid_size=100, view_size=5, max_hunger=100, num_trees=1, num_predators=1, results_path=None)
+                     grid_size=50, view_size=5, max_hunger=100, num_trees=8, num_predators=4, results_path=None)
     agent.train()
