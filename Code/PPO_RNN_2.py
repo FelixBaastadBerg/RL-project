@@ -103,7 +103,7 @@ class GridWorldEnv:
         self.apple_positions = []
         self.generate_apples()
 
-
+        # TODO: DUPLICATE APPLE PLACING??
         # available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
         available_apple_positions = [pos for tree in self.apple_trees for pos in tree if pos not in occupied_positions]
         if available_apple_positions:
@@ -120,6 +120,11 @@ class GridWorldEnv:
     def generate_apples(self):
         occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
         for tree in self.apple_trees:
+            max_apple_count = 5
+            current_apple_count = sum(self.grid[pos[0], pos[1]] == self.APPLE for pos in tree)
+            if current_apple_count >= max_apple_count:
+                continue
+
             # Exclude positions occupied by agent or predators
             available_positions = [pos for pos in tree if pos not in occupied_positions]
             if available_positions:
@@ -149,6 +154,7 @@ class GridWorldEnv:
             reward = 1
             self.hunger = 0
             self.grid[self.agent_pos[0], self.agent_pos[1]] = self.APPLE_TREE
+            self.apple_positions.remove(tuple(self.agent_pos))
         else: 
             self.hunger += 1
         """
@@ -262,6 +268,8 @@ class GridWorldEnv:
 
         self.steps += 1
         obs = self._get_observation()
+        # print("Reward: ", reward)
+        # print("Hunger: ", self.hunger)
         return obs, reward, self.done
 
     def _get_observation(self):
@@ -693,6 +701,6 @@ class PPOAgent:
 
 
 if __name__ == "__main__":
-    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=500, hidden_size=256,
-                     grid_size=50, view_size=5, max_hunger=100, num_trees=8, num_predators=4, results_path=None)
+    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=2000, hidden_size=256,
+                     grid_size=50, view_size=5, max_hunger=100, num_trees=4, num_predators=0, results_path=None)
     agent.train()
