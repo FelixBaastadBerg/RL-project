@@ -79,6 +79,6 @@ def test_multiple_policies(results_path, num_episodes=100):
     plt.show()
 
 if __name__ == "__main__":
-    results_path = "Results/241122-122207"  # Folder containing trained policies
-    num_episodes = 1  # Number of test episodes per policy
+    results_path = "Results/241123-002516"  # Folder containing trained policies
+    num_episodes = 100  # Number of test episodes per policy
     test_multiple_policies(results_path, num_episodes)
