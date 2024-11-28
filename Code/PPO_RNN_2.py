@@ -149,6 +149,7 @@ class GridWorldEnv:
             reward = 1
             self.hunger = 0
             self.grid[self.agent_pos[0], self.agent_pos[1]] = self.APPLE_TREE
+            self.apple_positions.remove(tuple(self.agent_pos))
         else: 
             self.hunger += 1
         """
@@ -246,9 +247,11 @@ class GridWorldEnv:
                 distance_to_agent = np.abs(pos - self.agent_pos).sum()
                 if distance_to_agent <= 1:
                     # Agent is adjacent to predator
-                    reward = -1
+                    reward = -10
                     self.done = True
                     break
+                elif distance_to_agent <= 3:
+                    reward = -1*(4 - distance_to_agent)  # Negative reward for being close to a predator
 
         if self.done:
             obs = self._get_observation()
@@ -694,5 +697,5 @@ class PPOAgent:
 
 if __name__ == "__main__":
     agent = PPOAgent(num_envs=100, num_steps=128, num_updates=500, hidden_size=256,
-                     grid_size=50, view_size=5, max_hunger=100, num_trees=8, num_predators=4, results_path=None)
+                     grid_size=20, view_size=5, max_hunger=100, num_trees=2, num_predators=1, results_path=None)
     agent.train()
