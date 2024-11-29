@@ -9,6 +9,7 @@ import random
 import matplotlib.pyplot as plt
 from matplotlib import colors
 import matplotlib.patches as mpatches
+import os
 
 class GridWorldEnv:
     EMPTY = 0
@@ -24,6 +25,7 @@ class GridWorldEnv:
         self.max_hunger = max_hunger
         self.num_predators = num_predators
         self.num_trees = num_trees
+        self.previous_predator_distance = -1
         self.reset()
 
     def reset(self):
@@ -103,18 +105,10 @@ class GridWorldEnv:
         self.apple_positions = []
         self.generate_apples()
 
-
-        # available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
-        available_apple_positions = [pos for tree in self.apple_trees for pos in tree if pos not in occupied_positions]
-        if available_apple_positions:
-            self.apple_pos = available_apple_positions[np.random.choice(len(available_apple_positions))]
-            self.grid[self.apple_pos[0], self.apple_pos[1]] = self.APPLE
-        else:
-            self.apple_pos = None  # No available position in the apple tree
-
         self.hunger = 0
         self.done = False
         self.steps = 0
+        self.previous_predator_distance = -1
         return self._get_observation()
     
     def generate_apples(self):
@@ -146,7 +140,7 @@ class GridWorldEnv:
         #print(tuple(self.agent_pos))
         #print(self.apple_positions)
         if tuple(self.agent_pos) in self.apple_positions:
-            reward = 1
+            reward += 5
             self.hunger = 0
             self.grid[self.agent_pos[0], self.agent_pos[1]] = self.APPLE_TREE
             self.apple_positions.remove(tuple(self.agent_pos))
@@ -173,7 +167,7 @@ class GridWorldEnv:
 
         # Check if the agent dies due to hunger
         if self.hunger >= self.max_hunger:
-            reward = -10  # Negative reward for dying
+            reward += -10  # Negative reward for dying
             self.done = True
 
         # Move predators (if any)
@@ -189,8 +183,8 @@ class GridWorldEnv:
             # Check if the agent is within 10 tiles (Manhattan distance)
             distance_to_agent = np.abs(pos - self.agent_pos).sum()
             if distance_to_agent <= 10:
-                # 50% chance to move towards the agent
-                if np.random.rand() < 0.5:
+                # 70% chance to move towards the agent
+                if np.random.rand() < 0.7:
                     # Move towards the agent
                     delta = self.agent_pos - pos
                     move_options = []
@@ -239,7 +233,7 @@ class GridWorldEnv:
         for pos in self.predator_positions:
             if np.array_equal(pos, self.agent_pos):
                 # Predator is at the same position as the agent
-                reward = -10  # Negative reward similar to dying of hunger
+                reward += -10  # Negative reward similar to dying of hunger
                 self.done = True
                 break
             else:
@@ -247,11 +241,19 @@ class GridWorldEnv:
                 distance_to_agent = np.abs(pos - self.agent_pos).sum()
                 if distance_to_agent <= 1:
                     # Agent is adjacent to predator
-                    reward = -10
+                    reward += -10
                     self.done = True
                     break
                 elif distance_to_agent <= 3:
-                    reward = -1*(4 - distance_to_agent)  # Negative reward for being close to a predator
+                    reward += -1*(4 - distance_to_agent)  # Negative reward for being close to a predator
+
+                if (self.previous_predator_distance != -1):
+                    if distance_to_agent > self.previous_predator_distance:
+                        reward += 1
+                if distance_to_agent > (self.view_size - 1):
+                    self.previous_predator_distance = -1
+                else:
+                    self.previous_predator_distance = distance_to_agent
 
         if self.done:
             obs = self._get_observation()
@@ -265,6 +267,7 @@ class GridWorldEnv:
 
         self.steps += 1
         obs = self._get_observation()
+        # print("Reward: " + str(reward))
         return obs, reward, self.done
 
     def _get_observation(self):
@@ -356,7 +359,7 @@ class PPOAgent:
         self.eps = 1e-5
 
         self.envs = [GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger, num_predators=self.num_predators, num_trees=self.num_trees) for _ in range(num_envs)]
-        self.input_size = 24  # 5x5 grid minus the agent's own position
+        self.input_size = self.view_size * self.view_size - 1 #The square of view size around the agent, minus its position
         self.num_actions = 4
         self.hidden_size = hidden_size  # Hidden size for LSTM
 
@@ -417,10 +420,10 @@ class PPOAgent:
                 # Track positions of the first agent and the apple
                 if track_positions and i == 0:
                     positions.append(tuple(env.agent_pos))
-                    if env.apple_pos is not None:
-                        apple_positions.append(env.apple_pos)
+                    if env.apple_positions:
+                        apple_positions.append(env.apple_positions)  # Track all apple positions
                     else:
-                        apple_positions.append(None)
+                        apple_positions.append(None)    
 
                 if done:
                     ob = env.reset()
@@ -561,7 +564,7 @@ class PPOAgent:
             torch.save(self.policy.state_dict(), f'{self.results_path}/{self.config_string}.pth')
         else:
             self.plot_rewards()
-            self.plot_agent_positions()  # Plot the agent's positions
+            # self.plot_agent_positions()  # Plot the agent's positions #NB: NEEDS TO BE FIXED
             # Save the trained model
             torch.save(self.policy.state_dict(), 'trained_policy.pth')
             # Run the test environment
@@ -594,7 +597,16 @@ class PPOAgent:
         # Plot the apple's positions
         apple_positions_filtered = [pos for pos in self.apple_positions if pos is not None]
         if apple_positions_filtered:
-            apple_positions_array = np.array(apple_positions_filtered)
+            # Flatten the list if it contains nested sequences
+            flat_apple_positions = []
+            for item in apple_positions_filtered:
+                if isinstance(item, list):  # If it's a nested list (e.g., [[(1, 2), (3, 4)], ...])
+                    flat_apple_positions.extend(item)
+                elif isinstance(item, tuple):  # If it's a tuple
+                    flat_apple_positions.append(item)
+                # Skip invalid types like `None` (already filtered)
+            # apple_positions_array = np.array(apple_positions_filtered)
+            apple_positions_array = np.array(flat_apple_positions)
             apple_x_positions = apple_positions_array[:, 1]
             apple_y_positions = apple_positions_array[:, 0]
             apple_timesteps = [i for i, pos in enumerate(self.apple_positions) if pos is not None]
@@ -696,6 +708,13 @@ class PPOAgent:
 
 
 if __name__ == "__main__":
-    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=500, hidden_size=256,
-                     grid_size=20, view_size=5, max_hunger=100, num_trees=2, num_predators=1, results_path=None)
+    os.environ["OMP_NUM_THREADS"] = "12"  # Number of threads for OpenMP
+    os.environ["MKL_NUM_THREADS"] = "12"  # Number of threads for Intel MKL
+
+    # Configure PyTorch threading
+    torch.set_num_threads(12)  # Number of threads for intra-op parallelism
+    torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
+
+    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=2000, hidden_size=256,
+                     grid_size=20, view_size=7, max_hunger=100, num_trees=2, num_predators=1, results_path=None)
     agent.train()
