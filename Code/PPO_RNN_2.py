@@ -9,6 +9,7 @@ import random
 import matplotlib.pyplot as plt
 from matplotlib import colors
 import matplotlib.patches as mpatches
+import os
 
 class GridWorldEnv:
     EMPTY = 0
@@ -18,10 +19,13 @@ class GridWorldEnv:
     AGENT = 4  # Added for visualization
     APPLE_TREE = 5  # New constant for apple tree tiles
 
-    def __init__(self, grid_size=20, view_size=5, max_hunger=100):
+    def __init__(self, grid_size=20, view_size=5, max_hunger=100, num_predators=1, num_trees=1):
         self.grid_size = grid_size
         self.view_size = view_size
         self.max_hunger = max_hunger
+        self.num_predators = num_predators
+        self.num_trees = num_trees
+        self.previous_predator_distance = -1
         self.reset()
 
     def reset(self):
@@ -30,18 +34,45 @@ class GridWorldEnv:
         self.grid[0, :] = self.grid[-1, :] = self.grid[:, 0] = self.grid[:, -1] = self.WALL
 
         # Generate the apple tree
+        # max_tree_start = self.grid_size - 5 - 1  # -1 to account for the walls
+        # tree_x = np.random.randint(1, max_tree_start + 1)
+        # tree_y = np.random.randint(1, max_tree_start + 1)
+        # self.apple_tree_positions = []
+        # for i in range(tree_x, tree_x + 5):
+        #     for j in range(tree_y, tree_y + 5):
+        #         self.apple_tree_positions.append((i, j))
+        #         self.grid[i, j] = self.APPLE_TREE  # Mark the apple tree on the grid
+
+        # Generate multiple apple trees
         max_tree_start = self.grid_size - 5 - 1  # -1 to account for the walls
-        tree_x = np.random.randint(1, max_tree_start + 1)
-        tree_y = np.random.randint(1, max_tree_start + 1)
-        self.apple_tree_positions = []
-        for i in range(tree_x, tree_x + 5):
-            for j in range(tree_y, tree_y + 5):
-                self.apple_tree_positions.append((i, j))
-                self.grid[i, j] = self.APPLE_TREE  # Mark the apple tree on the grid
+        self.apple_trees = []
+        occupied_positions = set()
+        for _ in range(self.num_trees):
+            overlap = True
+            attempts = 0
+            while overlap:
+                tree_x = np.random.randint(1, max_tree_start + 1)
+                tree_y = np.random.randint(1, max_tree_start + 1)
+                apple_tree_positions = []
+                for i in range(tree_x, tree_x + 5):
+                    for j in range(tree_y, tree_y + 5):
+                        apple_tree_positions.append((i, j))
+                overlap = any(pos in occupied_positions for pos in apple_tree_positions)
+                attempts += 1
+                if attempts > 100:  # Prevent infinite loops
+                    print("Could not place all apple trees without overlap.")
+                    break
+            if attempts > 100:
+                break
+            occupied_positions.update(apple_tree_positions)
+            self.apple_trees.append(apple_tree_positions)
+            for pos in apple_tree_positions:
+                self.grid[pos[0], pos[1]] = self.APPLE_TREE
 
         # Remove apple tree positions from empty cells
         empty_cells = np.argwhere(self.grid == self.EMPTY)
-        apple_tree_set = set(self.apple_tree_positions)
+        # apple_tree_set = set(self.apple_tree_positions)
+        apple_tree_set = set(pos for tree in self.apple_trees for pos in tree)
         empty_cells = [cell for cell in empty_cells if tuple(cell) not in apple_tree_set]
         empty_cells = np.array(empty_cells)
 
@@ -54,8 +85,7 @@ class GridWorldEnv:
         # Place predators
         self.predator_positions = []
         self.predator_underlying_cells = []  # New list to store underlying cells
-        num_predators = 1  # Adjust the number of predators as needed
-        for _ in range(num_predators):
+        for _ in range(self.num_predators):
             if len(empty_cells) > 0:
                 predator_pos = empty_cells[np.random.choice(len(empty_cells))]
                 self.predator_positions.append(predator_pos)
@@ -70,17 +100,26 @@ class GridWorldEnv:
         # Place an apple randomly within the apple tree
         # Ensure the apple doesn't spawn on the agent or predators
         occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
-        available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
-        if available_apple_positions:
-            self.apple_pos = available_apple_positions[np.random.choice(len(available_apple_positions))]
-            self.grid[self.apple_pos[0], self.apple_pos[1]] = self.APPLE
-        else:
-            self.apple_pos = None  # No available position in the apple tree
+
+        self.apple_timer = 0
+        self.apple_positions = []
+        self.generate_apples()
 
         self.hunger = 0
         self.done = False
         self.steps = 0
+        self.previous_predator_distance = -1
         return self._get_observation()
+    
+    def generate_apples(self):
+        occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
+        for tree in self.apple_trees:
+            # Exclude positions occupied by agent or predators
+            available_positions = [pos for pos in tree if pos not in occupied_positions]
+            if available_positions:
+                apple_pos = random.choice(available_positions)
+                self.apple_positions.append(apple_pos)
+                self.grid[apple_pos[0], apple_pos[1]] = self.APPLE
 
     def step(self, action):
         if self.done:
@@ -98,6 +137,16 @@ class GridWorldEnv:
             self.agent_pos = next_pos
 
         # Check for apple consumption
+        #print(tuple(self.agent_pos))
+        #print(self.apple_positions)
+        if tuple(self.agent_pos) in self.apple_positions:
+            reward += 5
+            self.hunger = 0
+            self.grid[self.agent_pos[0], self.agent_pos[1]] = self.APPLE_TREE
+            self.apple_positions.remove(tuple(self.agent_pos))
+        else: 
+            self.hunger += 1
+        """
         if self.apple_pos is not None and np.array_equal(self.agent_pos, self.apple_pos):
             reward = 1  # Reward for eating an apple
             self.hunger = 0  # Reset hunger
@@ -105,7 +154,8 @@ class GridWorldEnv:
 
             # Place a new apple within the apple tree
             occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
-            available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
+            # available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
+            available_apple_positions = [pos for tree in self.apple_trees for pos in tree if pos not in occupied_positions]
             if available_apple_positions:
                 self.apple_pos = available_apple_positions[np.random.choice(len(available_apple_positions))]
                 self.grid[self.apple_pos[0], self.apple_pos[1]] = self.APPLE
@@ -113,10 +163,11 @@ class GridWorldEnv:
                 self.apple_pos = None  # No available position in the apple tree
         else:
             self.hunger += 1
+        """
 
         # Check if the agent dies due to hunger
         if self.hunger >= self.max_hunger:
-            reward = -1  # Negative reward for dying
+            reward += -10  # Negative reward for dying
             self.done = True
 
         # Move predators (if any)
@@ -132,8 +183,8 @@ class GridWorldEnv:
             # Check if the agent is within 10 tiles (Manhattan distance)
             distance_to_agent = np.abs(pos - self.agent_pos).sum()
             if distance_to_agent <= 10:
-                # 50% chance to move towards the agent
-                if np.random.rand() < 0.5:
+                # 70% chance to move towards the agent
+                if np.random.rand() < 0.7:
                     # Move towards the agent
                     delta = self.agent_pos - pos
                     move_options = []
@@ -182,7 +233,7 @@ class GridWorldEnv:
         for pos in self.predator_positions:
             if np.array_equal(pos, self.agent_pos):
                 # Predator is at the same position as the agent
-                reward = -1  # Negative reward similar to dying of hunger
+                reward += -10  # Negative reward similar to dying of hunger
                 self.done = True
                 break
             else:
@@ -190,16 +241,33 @@ class GridWorldEnv:
                 distance_to_agent = np.abs(pos - self.agent_pos).sum()
                 if distance_to_agent <= 1:
                     # Agent is adjacent to predator
-                    reward = -1
+                    reward += -10
                     self.done = True
                     break
+                elif distance_to_agent <= 3:
+                    reward += -2*(4 - distance_to_agent)  # Negative reward for being close to a predator
+
+                if (self.previous_predator_distance != -1):
+                    if distance_to_agent > self.previous_predator_distance:
+                        reward += 2
+                if distance_to_agent > (self.view_size - 1):
+                    self.previous_predator_distance = -1
+                else:
+                    self.previous_predator_distance = distance_to_agent
 
         if self.done:
             obs = self._get_observation()
             return obs, reward, self.done
 
+        # Increment apple timer and generate apples if needed
+        self.apple_timer += 1
+        if self.apple_timer >= 20:
+            self.generate_apples()
+            self.apple_timer = 0
+
         self.steps += 1
         obs = self._get_observation()
+        # print("Reward: " + str(reward))
         return obs, reward, self.done
 
     def _get_observation(self):
@@ -269,13 +337,17 @@ class PolicyValueNetwork(nn.Module):
         return policy_logits, value.squeeze(-1), (hx, cx)
 
 class PPOAgent:
-    def __init__(self, num_envs=100, num_steps=128, num_updates=2000, hidden_size = 128, grid_size=20, view_size=5, max_hunger=100):
+    def __init__(self, num_envs=100, num_steps=128, num_updates=2000, hidden_size = 128, grid_size=20, view_size=5, max_hunger=100, num_trees=1, num_predators=1, results_path=None):
+        self.config_string = f"envs_{num_envs}-steps_{num_steps}-updates_{num_updates}-hidden_{hidden_size}-grid_{grid_size}-view_{view_size}-hunger_{max_hunger}-trees_{num_trees}-predators_{num_predators}"
+
         self.num_envs = num_envs
         self.num_steps = num_steps
         self.num_updates = num_updates
         self.grid_size = grid_size
         self.view_size = view_size
         self.max_hunger = max_hunger
+        self.num_trees = num_trees
+        self.num_predators = num_predators
 
         self.gamma = 0.99
         self.gae_lambda = 0.95
@@ -286,8 +358,8 @@ class PPOAgent:
         self.learning_rate = 2.5e-4
         self.eps = 1e-5
 
-        self.envs = [GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger) for _ in range(num_envs)]
-        self.input_size = 24  # 5x5 grid minus the agent's own position
+        self.envs = [GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger, num_predators=self.num_predators, num_trees=self.num_trees) for _ in range(num_envs)]
+        self.input_size = self.view_size * self.view_size - 1 #The square of view size around the agent, minus its position
         self.num_actions = 4
         self.hidden_size = hidden_size  # Hidden size for LSTM
 
@@ -298,6 +370,8 @@ class PPOAgent:
         self.all_rewards = []
         self.agent_positions = []  # To track positions of the first agent
         self.apple_positions = []  # To track positions of the apple
+
+        self.results_path = results_path
 
         # Initialize LSTM hidden states (num_layers=1)
         self.hx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
@@ -346,10 +420,10 @@ class PPOAgent:
                 # Track positions of the first agent and the apple
                 if track_positions and i == 0:
                     positions.append(tuple(env.agent_pos))
-                    if env.apple_pos is not None:
-                        apple_positions.append(env.apple_pos)
+                    if env.apple_positions:
+                        apple_positions.append(env.apple_positions)  # Track all apple positions
                     else:
-                        apple_positions.append(None)
+                        apple_positions.append(None)    
 
                 if done:
                     ob = env.reset()
@@ -398,7 +472,7 @@ class PPOAgent:
         return advantages, returns
 
     def update_policy(self, obs_batch, actions_batch, log_probs_old_batch,
-                      returns_batch, advantages_batch, hxs_batch, cxs_batch):
+                    returns_batch, advantages_batch, hxs_batch, cxs_batch, old_values_batch):
         # Normalize advantages
         advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
 
@@ -419,6 +493,7 @@ class PPOAgent:
             advantages_mb = advantages_batch[mb_indices].to(self.device)
             hxs_mb = hxs_batch[mb_indices].unsqueeze(0).to(self.device)  # Add num_layers dimension
             cxs_mb = cxs_batch[mb_indices].unsqueeze(0).to(self.device)
+            old_values_mb = old_values_batch[mb_indices].to(self.device)
 
             # Forward pass with LSTM hidden states
             policy_logits, value, _ = self.policy(obs_mb, hxs_mb, cxs_mb)
@@ -431,7 +506,13 @@ class PPOAgent:
             surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * advantages_mb
             actor_loss = -torch.min(surr1, surr2).mean()
 
-            value_loss = F.mse_loss(value, returns_mb)
+            # Clipped value function
+            value_pred = value.squeeze(-1)
+            value_pred_clipped = old_values_mb + (value_pred - old_values_mb).clamp(-self.clip_epsilon, self.clip_epsilon)
+            value_loss_unclipped = (value_pred - returns_mb).pow(2)
+            value_loss_clipped = (value_pred_clipped - returns_mb).pow(2)
+            value_loss = 0.5 * torch.max(value_loss_unclipped, value_loss_clipped).mean()
+
             loss = actor_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy
 
             self.optimizer.zero_grad()
@@ -441,13 +522,14 @@ class PPOAgent:
 
         return loss.item(), actor_loss, value_loss, entropy
 
+
     def train(self):
         for update in range(self.num_updates):
             # Set track_positions=True during the last rollout
             track_positions = (update == self.num_updates - 1)
 
             (obs_list, actions_list, log_probs_list, values_list,
-             rewards_list, dones_list, next_value, hxs_list, cxs_list) = self.collect_rollouts(track_positions=track_positions)
+            rewards_list, dones_list, next_value, hxs_list, cxs_list) = self.collect_rollouts(track_positions=track_positions)
 
             advantages, returns = self.compute_gae(rewards_list, values_list, dones_list, next_value)
 
@@ -459,9 +541,14 @@ class PPOAgent:
             advantages_batch = advantages.view(-1)
             hxs_batch = torch.stack(hxs_list).view(-1, self.hidden_size)
             cxs_batch = torch.stack(cxs_list).view(-1, self.hidden_size)
+            old_values_batch = torch.stack(values_list).view(-1)  # Flatten old values
 
-            loss, actor_loss, value_loss, entropy = self.update_policy(obs_batch, actions_batch, log_probs_old_batch,
-                                      returns_batch, advantages_batch, hxs_batch, cxs_batch)
+            # Ensure old_values are detached from the computation graph
+            old_values_batch = old_values_batch.detach()
+
+            loss, actor_loss, value_loss, entropy = self.update_policy(
+                obs_batch, actions_batch, log_probs_old_batch,
+                returns_batch, advantages_batch, hxs_batch, cxs_batch, old_values_batch)
 
             # Tracking average reward
             avg_reward = torch.stack(rewards_list).sum(0).mean().item()
@@ -473,17 +560,20 @@ class PPOAgent:
 
 
         print("Training completed!")
-        self.plot_rewards()
-        self.plot_agent_positions()  # Plot the agent's positions
-        # Save the trained model
-        torch.save(self.policy.state_dict(), 'trained_policy.pth')
-        # Run the test environment
-        self.test_trained_model()
+        if self.results_path:
+            torch.save(self.policy.state_dict(), f'{self.results_path}/{self.config_string}.pth')
+        else:
+            self.plot_rewards()
+            # self.plot_agent_positions()  # Plot the agent's positions #NB: NEEDS TO BE FIXED
+            # Save the trained model
+            torch.save(self.policy.state_dict(), 'trained_policy.pth')
+            # Run the test environment
+            self.test_trained_model()
+
 
     def plot_rewards(self):
         plt.figure(figsize=(12, 6))
         plt.plot(self.all_rewards)
-        plt.title('Average Reward per Update')
         plt.xlabel('Update')
         plt.ylabel('Average Reward')
         plt.grid()
@@ -507,14 +597,24 @@ class PPOAgent:
         # Plot the apple's positions
         apple_positions_filtered = [pos for pos in self.apple_positions if pos is not None]
         if apple_positions_filtered:
-            apple_positions_array = np.array(apple_positions_filtered)
+            # Flatten the list if it contains nested sequences
+            flat_apple_positions = []
+            for item in apple_positions_filtered:
+                if isinstance(item, list):  # If it's a nested list (e.g., [[(1, 2), (3, 4)], ...])
+                    flat_apple_positions.extend(item)
+                elif isinstance(item, tuple):  # If it's a tuple
+                    flat_apple_positions.append(item)
+                # Skip invalid types like `None` (already filtered)
+            # apple_positions_array = np.array(apple_positions_filtered)
+            apple_positions_array = np.array(flat_apple_positions)
             apple_x_positions = apple_positions_array[:, 1]
             apple_y_positions = apple_positions_array[:, 0]
             apple_timesteps = [i for i, pos in enumerate(self.apple_positions) if pos is not None]
             plt.scatter(apple_x_positions, apple_y_positions, c=apple_timesteps, cmap='cool', marker='x', label='Apple')
 
         # Plot the apple tree positions
-        apple_tree_positions = np.array(self.envs[0].apple_tree_positions)
+        # apple_tree_positions = np.array(self.envs[0].apple_tree_positions)
+        apple_tree_positions = np.array([pos for tree in self.envs[0].apple_trees for pos in tree])
         if len(apple_tree_positions) > 0:
             plt.scatter(apple_tree_positions[:, 1], apple_tree_positions[:, 0], color='brown', marker='s', label='Apple Tree')
 
@@ -531,7 +631,7 @@ class PPOAgent:
 
     def test_trained_model(self):
         # Initialize a new environment
-        test_env = GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger)
+        test_env = GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger, num_predators=self.num_predators, num_trees=self.num_trees)
         obs = test_env.reset()
         obs = torch.tensor(obs, device=self.device).unsqueeze(0)
         hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
@@ -579,6 +679,14 @@ class PPOAgent:
         update_plot()
 
 if __name__ == "__main__":
-    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=500, hidden_size=128,
-                     grid_size=20, view_size=5, max_hunger=100)
+
+    os.environ["OMP_NUM_THREADS"] = "12"  # Number of threads for OpenMP
+    os.environ["MKL_NUM_THREADS"] = "12"  # Number of threads for Intel MKL
+
+    # Configure PyTorch threading
+    torch.set_num_threads(12)  # Number of threads for intra-op parallelism
+    torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
+
+    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=2000, hidden_size=256,
+                     grid_size=20, view_size=7, max_hunger=100, num_trees=2, num_predators=1, results_path=None)
     agent.train()
