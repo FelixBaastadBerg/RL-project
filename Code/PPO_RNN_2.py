@@ -245,11 +245,11 @@ class GridWorldEnv:
                     self.done = True
                     break
                 elif distance_to_agent <= 3:
-                    reward += -1*(4 - distance_to_agent)  # Negative reward for being close to a predator
+                    reward += -2*(4 - distance_to_agent)  # Negative reward for being close to a predator
 
                 if (self.previous_predator_distance != -1):
                     if distance_to_agent > self.previous_predator_distance:
-                        reward += 1
+                        reward += 2
                 if distance_to_agent > (self.view_size - 1):
                     self.previous_predator_distance = -1
                 else:
