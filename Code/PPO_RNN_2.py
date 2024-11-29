@@ -112,11 +112,13 @@ class GridWorldEnv:
         return self._get_observation()
     
     def generate_apples(self):
-        occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
+        occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions] + [tuple(pos) for pos in self.apple_positions]
         for tree in self.apple_trees:
             # Exclude positions occupied by agent or predators
             available_positions = [pos for pos in tree if pos not in occupied_positions]
-            if available_positions:
+            max_apples = 5
+            tree_size = 25
+            if available_positions and (len(available_positions) > (tree_size - max_apples)):
                 apple_pos = random.choice(available_positions)
                 self.apple_positions.append(apple_pos)
                 self.grid[apple_pos[0], apple_pos[1]] = self.APPLE
@@ -249,7 +251,7 @@ class GridWorldEnv:
 
                 if (self.previous_predator_distance != -1):
                     if distance_to_agent > self.previous_predator_distance:
-                        reward += 2
+                        reward += 5
                 if distance_to_agent > (self.view_size - 1):
                     self.previous_predator_distance = -1
                 else:
@@ -267,7 +269,7 @@ class GridWorldEnv:
 
         self.steps += 1
         obs = self._get_observation()
-        # print("Reward: " + str(reward))
+        print("Reward: " + str(reward))
         return obs, reward, self.done
 
     def _get_observation(self):
@@ -715,6 +717,6 @@ if __name__ == "__main__":
     torch.set_num_threads(12)  # Number of threads for intra-op parallelism
     torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
 
-    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=2000, hidden_size=256,
+    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=5000, hidden_size=256,
                      grid_size=20, view_size=7, max_hunger=100, num_trees=2, num_predators=1, results_path=None)
     agent.train()
