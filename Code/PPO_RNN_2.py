@@ -678,36 +678,8 @@ class PPOAgent:
 
         update_plot()
 
-        def on_key(event):
-            nonlocal obs, hx, cx, done, step
-            if event.key == 'right' and not done:
-                with torch.no_grad():
-                    policy_logits, _, (hx, cx) = self.policy(obs, hx, cx)
-                    dist = torch.distributions.Categorical(logits=policy_logits)
-                    action = dist.sample()
-                ob, reward, done = test_env.step(action.item())
-
-                # Reset hidden states if done
-                if done:
-                    hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
-                    cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
-                    print(f"Episode ended with reward: {reward}")
-                else:
-                    hx = hx.detach()
-                    cx = cx.detach()
-
-                obs = torch.tensor(ob, device=self.device).unsqueeze(0)
-                step += 1
-                update_plot()
-            elif event.key == 'q':
-                plt.close()
-
-        fig.canvas.mpl_connect('key_press_event', on_key)
-        plt.ioff()
-        plt.show()
-
-
 if __name__ == "__main__":
+
     os.environ["OMP_NUM_THREADS"] = "12"  # Number of threads for OpenMP
     os.environ["MKL_NUM_THREADS"] = "12"  # Number of threads for Intel MKL
 
