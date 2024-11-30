@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 import matplotlib.patches as mpatches
 import os
+import multiprocessing
 
 class GridWorldEnv:
     EMPTY = 0
@@ -112,13 +113,11 @@ class GridWorldEnv:
         return self._get_observation()
     
     def generate_apples(self):
-        occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions] + [tuple(pos) for pos in self.apple_positions]
+        occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
         for tree in self.apple_trees:
             # Exclude positions occupied by agent or predators
             available_positions = [pos for pos in tree if pos not in occupied_positions]
-            max_apples = 5
-            tree_size = 25
-            if available_positions and (len(available_positions) > (tree_size - max_apples)):
+            if available_positions:
                 apple_pos = random.choice(available_positions)
                 self.apple_positions.append(apple_pos)
                 self.grid[apple_pos[0], apple_pos[1]] = self.APPLE
@@ -251,7 +250,7 @@ class GridWorldEnv:
 
                 if (self.previous_predator_distance != -1):
                     if distance_to_agent > self.previous_predator_distance:
-                        reward += 5
+                        reward += 2
                 if distance_to_agent > (self.view_size - 1):
                     self.previous_predator_distance = -1
                 else:
@@ -259,7 +258,7 @@ class GridWorldEnv:
 
         if self.done:
             obs = self._get_observation()
-            return obs, reward, self.done
+            return obs, reward, self.done, {}
 
         # Increment apple timer and generate apples if needed
         self.apple_timer += 1
@@ -269,8 +268,14 @@ class GridWorldEnv:
 
         self.steps += 1
         obs = self._get_observation()
-        print("Reward: " + str(reward))
-        return obs, reward, self.done
+
+        info = {
+            'agent_pos': self.agent_pos.copy(),
+            'apple_positions': self.apple_positions.copy()
+        }
+        # print("Reward: " + str(reward))
+        return obs, reward, self.done, info
+
 
     def _get_observation(self):
         # Extract a 5x5 observation around the agent, excluding the agent's position
@@ -296,6 +301,27 @@ class GridWorldEnv:
         obs_flat = np.delete(obs_flat, agent_idx)  # Remove the agent's own position
         return obs_flat  # Returns an array of length 24
 
+
+    # Define the worker function for each process
+def worker(remote, parent_remote, env_fn_wrapper):
+    parent_remote.close()
+    env = env_fn_wrapper.x()
+    while True:
+        cmd, data = remote.recv()
+        if cmd == 'step':
+            ob, reward, done, info = env.step(data)
+            if done:
+                ob = env.reset()
+            remote.send((ob, reward, done, info))
+        elif cmd == 'reset':
+            ob = env.reset()
+            remote.send(ob)
+        elif cmd == 'close':
+            remote.close()
+            break
+        else:
+            raise NotImplementedError
+            
 
 class PolicyValueNetwork(nn.Module):
     def __init__(self, input_size, num_actions, hidden_size=128):
@@ -338,7 +364,75 @@ class PolicyValueNetwork(nn.Module):
 
         return policy_logits, value.squeeze(-1), (hx, cx)
 
+
+# Wrapper to make the environment function picklable
+class EnvFnWrapper(object):
+    def __init__(self, env_fn):
+        self.env_fn = env_fn
+    def x(self):
+        return self.env_fn()
+    
+
+# ParallelEnv class to manage multiple environment processes
+class ParallelEnv:
+    def __init__(self, num_envs, env_fn):
+        self.waiting = False
+        self.closed = False
+        self.num_envs = num_envs
+
+        self.remotes, self.work_remotes = zip(*[multiprocessing.Pipe() for _ in range(num_envs)])
+        self.processes = []
+
+        for work_remote, remote in zip(self.work_remotes, self.remotes):
+            env_fn_wrapper = EnvFnWrapper(env_fn)
+            process = multiprocessing.Process(target=worker, args=(work_remote, remote, env_fn_wrapper))
+            process.daemon = True
+            process.start()
+            work_remote.close()
+
+        self.remotes = self.remotes
+    
+    def step_async(self, actions):
+        for remote, action in zip(self.remotes, actions):
+            remote.send(('step', action))
+        self.waiting = True
+
+    def step_wait(self):
+        results = [remote.recv() for remote in self.remotes]
+        self.waiting = False
+        obs, rewards, dones, infos = zip(*results)
+        return np.stack(obs), np.stack(rewards), np.stack(dones), infos
+
+    def step(self, actions):
+        self.step_async(actions)
+        return self.step_wait()
+
+    def reset(self):
+        for remote in self.remotes:
+            remote.send(('reset', None))
+        return np.stack([remote.recv() for remote in self.remotes])
+
+    def close(self):
+        if self.closed:
+            return
+        if self.waiting:
+            for remote in self.remotes:
+                remote.recv()
+        for remote in self.remotes:
+            remote.send(('close', None))
+        for process in self.processes:
+            process.join()
+        self.closed = True
+
+
+
 class PPOAgent:
+    
+    # Create a function to generate new environments
+    def make_env(self):
+            return GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger,
+                                num_predators=self.num_predators, num_trees=self.num_trees)
+    
     def __init__(self, num_envs=100, num_steps=128, num_updates=2000, hidden_size = 128, grid_size=20, view_size=5, max_hunger=100, num_trees=1, num_predators=1, results_path=None):
         self.config_string = f"envs_{num_envs}-steps_{num_steps}-updates_{num_updates}-hidden_{hidden_size}-grid_{grid_size}-view_{view_size}-hunger_{max_hunger}-trees_{num_trees}-predators_{num_predators}"
 
@@ -360,7 +454,11 @@ class PPOAgent:
         self.learning_rate = 2.5e-4
         self.eps = 1e-5
 
-        self.envs = [GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger, num_predators=self.num_predators, num_trees=self.num_trees) for _ in range(num_envs)]
+        
+
+  
+
+        self.envs = ParallelEnv(self.num_envs, self.make_env)
         self.input_size = self.view_size * self.view_size - 1 #The square of view size around the agent, minus its position
         self.num_actions = 4
         self.hidden_size = hidden_size  # Hidden size for LSTM
@@ -384,7 +482,7 @@ class PPOAgent:
         values_list, rewards_list, dones_list = [], [], []
         hxs_list, cxs_list = [], []
 
-        obs = np.array([env.reset() for env in self.envs])
+        obs = self.envs.reset()
         obs = torch.tensor(obs, device=self.device)
 
         # Initialize position tracking if needed
@@ -412,34 +510,29 @@ class PPOAgent:
             self.hx = hx.detach()
             self.cx = cx.detach()
 
-            obs_np = []
-            rewards = []
-            dones = []
+            actions_np = action.cpu().numpy()
+            obs_np, rewards_np, dones_np, infos = self.envs.step(actions_np)
 
-            for i, env in enumerate(self.envs):
-                ob, reward, done = env.step(action[i].item())
+            # Convert observations and rewards to tensors
+            obs = torch.tensor(obs_np, device=self.device)
+            rewards = torch.tensor(rewards_np, dtype=torch.float32)
+            dones = torch.tensor(dones_np, dtype=torch.float32)
 
-                # Track positions of the first agent and the apple
-                if track_positions and i == 0:
-                    positions.append(tuple(env.agent_pos))
-                    if env.apple_positions:
-                        apple_positions.append(env.apple_positions)  # Track all apple positions
-                    else:
-                        apple_positions.append(None)    
-
-                if done:
-                    ob = env.reset()
-                    # Reset hidden states for this environment
+            # For environments that are done, reset hidden states
+            for i in range(self.num_envs):
+                if dones_np[i]:
                     self.hx[:, i, :] = torch.zeros_like(self.hx[:, i, :])
                     self.cx[:, i, :] = torch.zeros_like(self.cx[:, i, :])
 
-                obs_np.append(ob)
-                rewards.append(reward)
-                dones.append(done)
+            rewards_list.append(rewards)
+            dones_list.append(dones)
 
-            obs = torch.tensor(obs_np, device=self.device)
-            rewards_list.append(torch.tensor(rewards, dtype=torch.float32))
-            dones_list.append(torch.tensor(dones, dtype=torch.float32))
+            # Track positions of the first agent and the apple
+            if track_positions:
+                # Assuming the first environment corresponds to the first agent
+                env_info = infos[0]
+                positions.append(env_info.get('agent_pos', None))
+                apple_positions.append(env_info.get('apple_positions', None))
 
         # Collect the last value estimation for GAE computation
         with torch.no_grad():
@@ -525,13 +618,14 @@ class PPOAgent:
         return loss.item(), actor_loss, value_loss, entropy
 
 
+    
     def train(self):
         for update in range(self.num_updates):
             # Set track_positions=True during the last rollout
             track_positions = (update == self.num_updates - 1)
 
             (obs_list, actions_list, log_probs_list, values_list,
-            rewards_list, dones_list, next_value, hxs_list, cxs_list) = self.collect_rollouts(track_positions=track_positions)
+             rewards_list, dones_list, next_value, hxs_list, cxs_list) = self.collect_rollouts(track_positions=track_positions)
 
             advantages, returns = self.compute_gae(rewards_list, values_list, dones_list, next_value)
 
@@ -560,13 +654,13 @@ class PPOAgent:
                 print(f'Update {update}, Loss: {loss:.4f}, Avg Reward: {avg_reward:.2f}')
                 print(f"Actor Loss: {actor_loss.item()}, Value Loss: {value_loss.item()}, Entropy: {entropy.item()}")
 
-
         print("Training completed!")
+        self.envs.close()  # Close the parallel environments
         if self.results_path:
             torch.save(self.policy.state_dict(), f'{self.results_path}/{self.config_string}.pth')
         else:
             self.plot_rewards()
-            # self.plot_agent_positions()  # Plot the agent's positions #NB: NEEDS TO BE FIXED
+            # self.plot_agent_positions()  # Plot the agent's positions (needs adjustment)
             # Save the trained model
             torch.save(self.policy.state_dict(), 'trained_policy.pth')
             # Run the test environment
@@ -680,6 +774,7 @@ class PPOAgent:
 
         update_plot()
 
+
 if __name__ == "__main__":
     os.environ["OMP_NUM_THREADS"] = "12"  # Number of threads for OpenMP
     os.environ["MKL_NUM_THREADS"] = "12"  # Number of threads for Intel MKL
@@ -688,6 +783,6 @@ if __name__ == "__main__":
     torch.set_num_threads(12)  # Number of threads for intra-op parallelism
     torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
 
-    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=20, hidden_size=256,
+    agent = PPOAgent(num_envs=8, num_steps=128, num_updates=100, hidden_size=256,
                      grid_size=20, view_size=7, max_hunger=100, num_trees=2, num_predators=1, results_path=None)
     agent.train()
