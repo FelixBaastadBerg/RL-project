@@ -17,6 +17,12 @@ class GridWorldEnv:
     APPLE = 2
     PREDATOR = 3
     AGENT = 4  # Added for visualization
+    APPLE_TREE = 5  # New constant for apple tree tilesclass GridWorldEnv:
+    EMPTY = 0
+    WALL = 1
+    APPLE = 2
+    PREDATOR = 3
+    AGENT = 4  # Added for visualization
     APPLE_TREE = 5  # New constant for apple tree tiles
 
     def __init__(self, grid_size=20, view_size=5, max_hunger=100, num_predators=1, num_trees=1):
@@ -45,7 +51,7 @@ class GridWorldEnv:
 
         # Generate multiple apple trees
         max_tree_start = self.grid_size - 5 - 1  # -1 to account for the walls
-        self.apple_trees = torch.zeros((self.num_trees, 5, 5), dtype=torch.int32)
+        self.apple_trees = []
         occupied_positions = set()
         
         for _ in range(self.num_trees):
@@ -55,8 +61,10 @@ class GridWorldEnv:
             while overlap:
                 tree_x = np.random.randint(1, max_tree_start + 1)
                 tree_y = np.random.randint(1, max_tree_start + 1)
-                
-                apple_tree_positions[tree_x:tree_x+5, tree_y:tree_y+5] = self.APPLE_TREE
+                apple_tree_positions = []
+                for i in range(tree_x, tree_x + 5):
+                    for j in range(tree_y, tree_y + 5):
+                        apple_tree_positions.append((i, j))
                 overlap = any(pos in occupied_positions for pos in apple_tree_positions)
                 attempts += 1
                 if attempts > 100:  # Prevent infinite loops
@@ -65,7 +73,7 @@ class GridWorldEnv:
             if attempts > 100:
                 break
             occupied_positions.update(apple_tree_positions)
-            self.apple_trees[_] = apple_tree_positions
+            self.apple_trees.append(apple_tree_positions)
             for pos in apple_tree_positions:
                 self.grid[pos[0], pos[1]] = self.APPLE_TREE
 
@@ -269,7 +277,7 @@ class GridWorldEnv:
 
         self.steps += 1
         obs = self._get_observation()
-        print("Reward: " + str(reward))
+        # print("Reward: " + str(reward))
         return obs, reward, self.done
 
     def _get_observation(self):
@@ -437,7 +445,8 @@ class PPOAgent:
                 rewards.append(reward)
                 dones.append(done)
 
-            obs = torch.tensor(obs_np, device=self.device)
+            # obs = torch.tensor(obs_np, device=self.device)
+            obs = torch.tensor(np.array(obs_np), device=self.device)
             rewards_list.append(torch.tensor(rewards, dtype=torch.float32))
             dones_list.append(torch.tensor(dones, dtype=torch.float32))
 
@@ -680,6 +689,31 @@ class PPOAgent:
 
         update_plot()
 
+        def on_key(event):
+            nonlocal obs, hx, cx, done, step
+            if event.key == 'right' and not done:
+                with torch.no_grad():
+                    policy_logits, _, (hx, cx) = self.policy(obs, hx, cx)
+                    dist = torch.distributions.Categorical(logits=policy_logits)
+                    action = dist.sample()
+                ob, reward, done = test_env.step(action.item())
+                # Reset hidden states if done
+                if done:
+                    hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+                    cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+                    print(f"Episode ended with reward: {reward}")
+                else:
+                    hx = hx.detach()
+                    cx = cx.detach()
+                obs = torch.tensor(ob, device=self.device).unsqueeze(0)
+                step += 1
+                update_plot()
+            elif event.key == 'q':
+                plt.close()
+        fig.canvas.mpl_connect('key_press_event', on_key)
+        plt.ioff()
+        plt.show()
+
 if __name__ == "__main__":
     os.environ["OMP_NUM_THREADS"] = "12"  # Number of threads for OpenMP
     os.environ["MKL_NUM_THREADS"] = "12"  # Number of threads for Intel MKL
@@ -688,6 +722,6 @@ if __name__ == "__main__":
     torch.set_num_threads(12)  # Number of threads for intra-op parallelism
     torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
 
-    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=20, hidden_size=256,
+    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=10, hidden_size=256,
                      grid_size=20, view_size=7, max_hunger=100, num_trees=2, num_predators=1, results_path=None)
     agent.train()
