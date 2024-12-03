@@ -17,12 +17,6 @@ class GridWorldEnv:
     APPLE = 2
     PREDATOR = 3
     AGENT = 4  # Added for visualization
-    APPLE_TREE = 5  # New constant for apple tree tilesclass GridWorldEnv:
-    EMPTY = 0
-    WALL = 1
-    APPLE = 2
-    PREDATOR = 3
-    AGENT = 4  # Added for visualization
     APPLE_TREE = 5  # New constant for apple tree tiles
 
     def __init__(self, grid_size=20, view_size=5, max_hunger=100, num_predators=1, num_trees=1):
@@ -57,13 +51,18 @@ class GridWorldEnv:
         for _ in range(self.num_trees):
             overlap = True
             attempts = 0
-            apple_tree_positions = torch.zeros((5, 5), dtype=torch.int32)
             while overlap:
                 tree_x = np.random.randint(1, max_tree_start + 1)
                 tree_y = np.random.randint(1, max_tree_start + 1)
                 apple_tree_positions = []
                 for i in range(tree_x, tree_x + 5):
                     for j in range(tree_y, tree_y + 5):
+                        if (i, j) in [ 
+                            (tree_x, tree_y),
+                            (tree_x + 4, tree_y),
+                            (tree_x, tree_y + 4),
+                            (tree_x + 4, tree_y + 4),
+                        ]: continue # Skip the corners
                         apple_tree_positions.append((i, j))
                 overlap = any(pos in occupied_positions for pos in apple_tree_positions)
                 attempts += 1
