@@ -427,7 +427,6 @@ class ParallelEnv:
 
 
 class PPOAgent:
-    
     # Create a function to generate new environments
     def make_env(self):
             return GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger,
@@ -453,10 +452,6 @@ class PPOAgent:
         self.max_grad_norm = 0.5
         self.learning_rate = 2.5e-4
         self.eps = 1e-5
-
-        
-
-  
 
         self.envs = ParallelEnv(self.num_envs, self.make_env)
         self.input_size = self.view_size * self.view_size - 1 #The square of view size around the agent, minus its position
@@ -783,6 +778,6 @@ if __name__ == "__main__":
     torch.set_num_threads(12)  # Number of threads for intra-op parallelism
     torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
 
-    agent = PPOAgent(num_envs=8, num_steps=128, num_updates=100, hidden_size=256,
+    agent = PPOAgent(num_envs=8, num_steps=128, num_updates=1000, hidden_size=256,
                      grid_size=20, view_size=7, max_hunger=100, num_trees=2, num_predators=1, results_path=None)
     agent.train()
