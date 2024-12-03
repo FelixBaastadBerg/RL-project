@@ -12,7 +12,8 @@ def test_agent_longest_run(agent, num_tests=100):
         obs = torch.tensor(env.reset(), device=device).unsqueeze(0)
         hx = torch.zeros(1, 1, agent.hidden_size, device=device)
         cx = torch.zeros(1, 1, agent.hidden_size, device=device)
-        hidden_states = []
+        states = []
+        states = []
 
 
         done = False
@@ -25,15 +26,17 @@ def test_agent_longest_run(agent, num_tests=100):
                 action = dist.sample()
 
             obs, _, done = env.step(action.item())
+            pos = np.array(env.agent_pos, dtype=np.float32)
             obs = torch.tensor(obs, device=device).unsqueeze(0)
-            hidden_states.append(hx.clone().squeeze(0).cpu().numpy())
+            state = np.concat((hx.clone().squeeze(0).cpu().numpy()[0], pos))
+            states.append(state)
             duration += 1
 
         if duration > max_duration:
             max_duration = duration
-            best_hidden_states = hidden_states
+            best_states = states
 
-    return max_duration, best_hidden_states
+    return max_duration, best_states
 
 
 if __name__ == "__main__":
@@ -42,7 +45,13 @@ if __name__ == "__main__":
     agent.policy.load_state_dict(torch.load('../trained_policy.pth', weights_only=True))
 
     B = 10  # Number of test iterations
-    duration, hidden_states = test_agent_longest_run(agent, num_tests=B)
+    duration, states = test_agent_longest_run(agent, num_tests=B)
 
+    header = ""
+    for i in range(states[0].shape[0] - 2):
+        header += f"hidden_{i},"
+    header += "x,y"
     print(f"Longest Duration: {duration} steps")
-    np.save('longest_run_hidden_states.npy', hidden_states)  # Save hidden states
+    np.savetxt('longest_run_states.csv', states, delimiter=',', header=header, comments='')
+
+    # np.save('longest_run_states.npy', states)  # Save hidden states
