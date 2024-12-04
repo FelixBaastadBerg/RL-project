@@ -124,18 +124,24 @@ class PPOAgent:
                 log_prob = dist.log_prob(action)
 
             # Store the collected data
-            obs_list.append(obs.cpu())
-            actions_list.append(action.cpu())
-            log_probs_list.append(log_prob.cpu())
-            values_list.append(value.cpu())
-            hxs_list.append(self.hx.squeeze(0).cpu())
-            cxs_list.append(self.cx.squeeze(0).cpu())
+            obs_list.append(obs)
+            actions_list.append(action)
+            log_probs_list.append(log_prob)
+            values_list.append(value)
+            hxs_list.append(self.hx.squeeze(0))
+            cxs_list.append(self.cx.squeeze(0))
+
+            # obs_list.append(obs.cpu())
+            # actions_list.append(action.cpu())
+            # log_probs_list.append(log_prob.cpu())
+            # values_list.append(value.cpu())
+
 
             # Update hidden states
             self.hx = hx.detach()
             self.cx = cx.detach()
 
-            actions_np = action.cpu().numpy()
+            actions_np = action #.cpu().numpy()
             obs, rewards, dones, infos = self.envs.step(actions_np)
 
             # Convert observations and rewards to tensors

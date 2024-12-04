@@ -121,7 +121,7 @@ class GridWorldEnv:
 
         # Map action to movement
         movement = {0: (-1, 0), 1: (1, 0), 2: (0, -1), 3: (0, 1)}
-        move = movement[action]
+        move = movement[int(action)]
         next_pos = self.agent_pos + np.array(move)
 
         # Check for wall collision
