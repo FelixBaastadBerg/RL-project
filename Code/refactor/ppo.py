@@ -108,7 +108,7 @@ class PPOAgent:
         hxs_list, cxs_list = [], []
 
         obs = self.envs.reset()
-        obs = torch.tensor(obs, device=self.device)
+        # obs = torch.tensor(obs, device=self.device)
 
         # Initialize position tracking if needed
         if track_positions:
@@ -175,11 +175,12 @@ class PPOAgent:
                 rewards_list, dones_list, next_value, hxs_list, cxs_list)
 
     def compute_gae(self, rewards_list, values_list, dones_list, next_value):
-        rewards = torch.stack(rewards_list)
-        values = torch.stack(values_list)
-        dones = torch.stack(dones_list)
+        rewards = torch.stack(rewards_list).to(self.device)
+        values = torch.stack(values_list).to(self.device)
+        dones = torch.stack(dones_list).to(self.device)
+        next_value = next_value.to(self.device)  # Ensure next_value is on the same device
 
-        advantages = torch.zeros_like(rewards, dtype=torch.float32)
+        advantages = torch.zeros_like(rewards, dtype=torch.float32, device=self.device)
         lastgaelam = 0
         for t in reversed(range(self.num_steps)):
             if t == self.num_steps - 1:

@@ -15,6 +15,9 @@ if __name__ == "__main__":
     num_trees = 2 # number of trees in the grid
     num_predators = 1 # number of predators in the grid
 
+
+    multiprocessing.set_start_method("spawn")
+    
     agent = PPOAgent(num_envs=num_envs, num_steps=num_steps, num_updates=num_updates, hidden_size=hidden_size,
                      grid_size=grid_size, view_size=view_size, max_hunger=max_hunger, num_trees=num_trees, num_predators=num_predators, results_path=None)
     agent.train()

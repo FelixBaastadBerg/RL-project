@@ -86,7 +86,8 @@ class ParallelEnv:
     def reset(self):
         for remote in self.remotes:
             remote.send(('reset', None))
-        return np.stack([remote.recv() for remote in self.remotes])
+        # print(type(self.remotes[0]))
+        return torch.stack([remote.recv() for remote in self.remotes])
 
     def close(self):
         if self.closed:
