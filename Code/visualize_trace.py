@@ -9,7 +9,7 @@ def calculate_distances(agent_positions, predator_positions):
     distances = []
     for predator_trace in predator_positions:
         distances_to_predator = [
-            np.linalg.norm(np.array(agent_pos) - np.array(predator_pos))
+            np.abs(np.array(agent_pos) - np.array(predator_pos)).sum()
             for agent_pos, predator_pos in zip(agent_positions, predator_trace)
         ]
         distances.append(distances_to_predator)
@@ -29,11 +29,11 @@ if __name__ == "__main__":
         num_steps=100,          # Not relevant for testing, just required for initialization
         num_updates=1,          # Not relevant for testing
         hidden_size=256,        # Hidden layer size
-        grid_size=100,           # Grid size
+        grid_size=120,           # Grid size
         view_size=7,            # Agent view size
         max_hunger=200,         # Hunger limit
-        num_trees=4,            # Number of apple trees
-        num_predators=4         # Number of predators
+        num_trees=8,            # Number of apple trees
+        num_predators=8         # Number of predators
     )
 
     # Load the trained policy
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     # To store all attempts
     attempts = []
 
-    for attempt in range(100):  # Run 100 independent attempts
+    for attempt in range(10):  # Run 100 independent attempts
         print(f"Attempt {attempt + 1}")
         # Initialize environment and tracking
         env = agent.envs[0]  # Single environment
@@ -261,7 +261,7 @@ if __name__ == "__main__":
                 predator_trace_smoothed[:, 1],
                 predator_trace_smoothed[:, 0],
                 '--',
-                label=f'Predator {i + 1} (Smoothed)',
+                label=f'Predator {i + 1}',
                 alpha=0.7
             )
 

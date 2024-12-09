@@ -52,7 +52,7 @@ class GridWorldEnv:
                 # tree_y = self.grid_size // 2 - 2
 
                 # Mehthod 3: Randomly place the apple trees close to center
-                tree_radius = self.grid_size // 4
+                tree_radius = self.grid_size // 5
                 tree_x = np.random.randint(tree_radius, self.grid_size - tree_radius - 5)
                 tree_y = np.random.randint(tree_radius, self.grid_size - tree_radius - 5)
 
@@ -102,7 +102,7 @@ class GridWorldEnv:
 
         # Remove the agent's position from empty_cells
         empty_cells = empty_cells[~np.all(empty_cells == self.agent_pos, axis=1)]
-        predator_radius = 10
+        predator_radius = 30
 
         # Remove cells further than the predator radius from the middle from empty_cells
         middle = self.grid_size // 2
@@ -788,5 +788,5 @@ if __name__ == "__main__":
     torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
 
     agent = PPOAgent(num_envs=100, num_steps=256, num_updates=3000, hidden_size=256,
-                     grid_size=100, view_size=7, max_hunger=100, num_trees=4, num_predators=4, results_path=None)
+                     grid_size=120, view_size=7, max_hunger=100, num_trees=8, num_predators=8, results_path=None)
     agent.train()
