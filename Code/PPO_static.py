@@ -120,7 +120,7 @@ class PolicyValueNetwork(nn.Module):
         return policy_logits, value.squeeze(-1)
 
 class PPOAgent:
-    def __init__(self, num_envs=30, num_steps=128, num_updates=20):
+    def __init__(self, num_envs=30, num_steps=128, num_updates=2000):
         self.num_envs = num_envs
         self.num_steps = num_steps
         self.num_updates = num_updates
@@ -308,7 +308,7 @@ class PPOAgent:
         plt.figure(figsize=(12, 6))
         plt.plot(self.all_rewards)
         plt.title('Average Reward per Update')
-        plt.xlabel('Update')
+        plt.xlabel('Number of Rollouts')
         plt.ylabel('Average Reward')
         plt.grid()
         plt.show()
@@ -358,25 +358,29 @@ class PPOAgent:
         policy_grid = np.full((grid_size, grid_size), -1)  # Initialize with -1 (walls)
 
         # Action mapping to directions
-        action_vectors = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0)}  # (dx, dy)
+        action_vectors = {0: (-1, 0), 1: (1, 0), 2: (0, -1), 3: (0, 1)}  # (dx, dy)
+
+        # Create a grid with walls and an apple at position (5,7)
+        grid = np.zeros((grid_size, grid_size), dtype=np.int32)
+        grid[0, :] = grid[-1, :] = grid[:, 0] = grid[:, -1] = 1  # Walls
+        grid[5, 7] = 2  # Apple represented by 2
 
         for x in range(1, grid_size - 1):
             for y in range(1, grid_size - 1):
-                # Create a default observation with empty surroundings and walls
+                # Create an observation centered at position (x, y)
                 obs_grid = np.zeros((view_size, view_size), dtype=np.int32)
 
-                # Determine the positions relative to the agent's local view
                 agent_view_x = view_size // 2
                 agent_view_y = view_size // 2
 
-                # Place walls in the observation if they are present in the global grid
                 for i in range(-agent_view_x, agent_view_x + 1):
                     for j in range(-agent_view_y, agent_view_y + 1):
                         global_x, global_y = x + i, y + j
-                        if global_x < 0 or global_x >= grid_size or global_y < 0 or global_y >= grid_size:
-                            obs_grid[agent_view_x + i, agent_view_y + j] = 1  # Wall
-                        elif global_x == 0 or global_x == grid_size - 1 or global_y == 0 or global_y == grid_size - 1:
-                            obs_grid[agent_view_x + i, agent_view_y + j] = 1  # Wall
+                        local_x, local_y = agent_view_x + i, agent_view_y + j
+                        if (0 <= global_x < grid_size) and (0 <= global_y < grid_size):
+                            obs_grid[local_x, local_y] = grid[global_x, global_y]
+                        else:
+                            obs_grid[local_x, local_y] = 1  # Wall
 
                 # Flatten the observation and remove the agent's own position
                 obs_flat = obs_grid.flatten()
@@ -402,16 +406,20 @@ class PPOAgent:
                 action = policy_grid[x, y]
                 if action != -1:
                     dx, dy = action_vectors[action]
-                    plt.arrow(y + 0.5, x + 0.5, dx * 0.4, dy * 0.4,
-                              head_width=0.2, head_length=0.2, fc='k', ec='k')
+                    plt.arrow(y + 0.5, x + 0.5, dy * 0.4, dx * 0.4,
+                            head_width=0.2, head_length=0.2, fc='k', ec='k')
+
+        # Plot the apple at position (5,7)
+        plt.scatter(7 + 0.5, 5 + 0.5, c='red', s=200, marker='o', label='Apple')
 
         plt.xlim(0, grid_size)
         plt.ylim(0, grid_size)
-        plt.title('Policy Visualization')
+        plt.title('Policy Visualization with Apple at (5,7)')
         plt.xlabel('Y Position')
         plt.ylabel('X Position')
         plt.gca().invert_yaxis()  # Invert y-axis to match grid coordinates
         plt.grid(True)
+        plt.legend()
         plt.show()
 
     def test_trained_model(self):
