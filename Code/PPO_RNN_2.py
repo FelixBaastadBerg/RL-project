@@ -33,16 +33,6 @@ class GridWorldEnv:
         self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.int32)
         self.grid[0, :] = self.grid[-1, :] = self.grid[:, 0] = self.grid[:, -1] = self.WALL
 
-        # Generate the apple tree
-        # max_tree_start = self.grid_size - 5 - 1  # -1 to account for the walls
-        # tree_x = np.random.randint(1, max_tree_start + 1)
-        # tree_y = np.random.randint(1, max_tree_start + 1)
-        # self.apple_tree_positions = []
-        # for i in range(tree_x, tree_x + 5):
-        #     for j in range(tree_y, tree_y + 5):
-        #         self.apple_tree_positions.append((i, j))
-        #         self.grid[i, j] = self.APPLE_TREE  # Mark the apple tree on the grid
-
         # Generate multiple apple trees
         max_tree_start = self.grid_size - 5 - 1  # -1 to account for the walls
         self.apple_trees = []
@@ -52,8 +42,19 @@ class GridWorldEnv:
             overlap = True
             attempts = 0
             while overlap:
-                tree_x = np.random.randint(1, max_tree_start + 1)
-                tree_y = np.random.randint(1, max_tree_start + 1)
+                # # Randomly place the apple tree
+                # tree_x = np.random.randint(1, max_tree_start + 1)
+                # tree_y = np.random.randint(1, max_tree_start + 1)
+
+                # # Place tree in the middle
+                # tree_x = self.grid_size // 2 - 2
+                # tree_y = self.grid_size // 2 - 2
+
+                # Randomly place the apple tree close to center
+                tree_radius = self.grid_size // 4
+                tree_x = np.random.randint(tree_radius, self.grid_size - tree_radius - 5)
+                tree_y = np.random.randint(tree_radius, self.grid_size - tree_radius - 5)
+
                 apple_tree_positions = []
                 for i in range(tree_x, tree_x + 5):
                     for j in range(tree_y, tree_y + 5):
@@ -84,10 +85,28 @@ class GridWorldEnv:
         empty_cells = np.array(empty_cells)
 
         # Place the agent randomly in empty cells (excluding apple tree positions)
-        self.agent_pos = empty_cells[np.random.choice(len(empty_cells))]
+        # self.agent_pos = empty_cells[np.random.choice(len(empty_cells))]
+
+        # Place the agent near a random part of a random tree
+        random_tree = self.apple_trees[np.random.choice(len(self.apple_trees))]
+        random_tree_part = random_tree[np.random.choice(len(random_tree))]
+
+        offset_x = np.random.randint(-3, 4)  # Random offset within viewing range
+        offset_y = np.random.randint(-3, 4)
+        self.agent_pos = [random_tree_part[0] + offset_x, random_tree_part[1] + offset_y]
+
+        # Ensure the agent position is within the grid and not a wall
+        self.agent_pos[0] = max(1, min(self.grid_size - 2, self.agent_pos[0]))
+        self.agent_pos[1] = max(1, min(self.grid_size - 2, self.agent_pos[1]))
 
         # Remove the agent's position from empty_cells
         empty_cells = empty_cells[~np.all(empty_cells == self.agent_pos, axis=1)]
+        predator_radius = 10
+
+        # Remove cells further than the predator radius from the middle from empty_cells
+        middle = self.grid_size // 2
+        empty_cells = empty_cells[np.abs(empty_cells[:, 0] - middle) <= predator_radius]
+        empty_cells = empty_cells[np.abs(empty_cells[:, 1] - middle) <= predator_radius]
 
         # Place predators
         self.predator_positions = []
@@ -124,7 +143,7 @@ class GridWorldEnv:
             # Exclude positions occupied by agent or predators
             available_positions = [pos for pos in tree if pos not in occupied_positions]
             max_apples = 5
-            tree_size = 25
+            tree_size = 25 - 4  # Total tree size minus the corners
             if available_positions and (len(available_positions) > (tree_size - max_apples)):
                 apple_pos = random.choice(available_positions)
                 self.apple_positions.append(apple_pos)
@@ -149,7 +168,7 @@ class GridWorldEnv:
         #print(tuple(self.agent_pos))
         #print(self.apple_positions)
         if tuple(self.agent_pos) in self.apple_positions:
-            reward += 5
+            reward += 2
             self.hunger = 0
             self.grid[self.agent_pos[0], self.agent_pos[1]] = self.APPLE_TREE
             self.apple_positions.remove(tuple(self.agent_pos))
@@ -216,6 +235,26 @@ class GridWorldEnv:
                 # Move randomly
                 move = random.choice([(-1, 0), (1, 0), (0, -1), (0, 1)])
 
+                # Move towards the middle with 10% probability --> slightly biased towards the middle
+                # if np.random.rand() < 0.1:
+                #     delta = np.array([self.grid_size // 2, self.grid_size // 2]) - pos
+                #     move_options = []
+                #     if delta[0] > 0:
+                #         move_options.append((1, 0))
+                #     elif delta[0] < 0:
+                #         move_options.append((-1, 0))
+                #     if delta[1] > 0:
+                #         move_options.append((0, 1))
+                #     elif delta[1] < 0:
+                #         move_options.append((0, -1))
+                #     if move_options:
+                #         move = random.choice(move_options)
+                #     else:
+                #         move = (0, 0) # Predator is in the middle
+                # else:
+                #     # Move randomly
+                #     move = random.choice([(-1, 0), (1, 0), (0, -1), (0, 1)])
+
             next_pos = pos + np.array(move)
             # Check for wall collision, other predators, and apple
             if self.grid[next_pos[0], next_pos[1]] not in [self.WALL, self.PREDATOR, self.APPLE]:
@@ -253,16 +292,16 @@ class GridWorldEnv:
                     reward += -10
                     self.done = True
                     break
-                elif distance_to_agent <= 3:
-                    reward += -2*(4 - distance_to_agent)  # Negative reward for being close to a predator
+                # elif distance_to_agent <= 3:
+                #     reward += -2*(4 - distance_to_agent)  # Negative reward for being close to a predator
 
-                if (self.previous_predator_distance != -1):
-                    if distance_to_agent > self.previous_predator_distance:
-                        reward += 5
-                if distance_to_agent > (self.view_size - 1):
-                    self.previous_predator_distance = -1
-                else:
-                    self.previous_predator_distance = distance_to_agent
+                # if (self.previous_predator_distance != -1):
+                #     if distance_to_agent > self.previous_predator_distance:
+                #         reward += 5
+                # if distance_to_agent > (self.view_size - 1):
+                #     self.previous_predator_distance = -1
+                # else:
+                #     self.previous_predator_distance = distance_to_agent
 
         if self.done:
             obs = self._get_observation()
@@ -381,6 +420,7 @@ class PPOAgent:
         self.apple_positions = []  # To track positions of the apple
 
         self.results_path = results_path
+        self.temp_plot_initialized = False
 
         # Initialize LSTM hidden states (num_layers=1)
         self.hx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
@@ -568,8 +608,17 @@ class PPOAgent:
                 print(f'Update {update}, Loss: {loss:.4f}, Avg Reward: {avg_reward:.2f}')
                 print(f"Actor Loss: {actor_loss.item()}, Value Loss: {value_loss.item()}, Entropy: {entropy.item()}")
 
+            if update % 100 == 0 and update > 0:
+                self.plot_rewards_temp()
+                torch.save(self.policy.state_dict(), 'trained_policy_temp.pth')
+
 
         print("Training completed!")
+        if self.temp_plot_initialized:
+            plt.close(self.fig)  # Close the temporary plot window
+            plt.close('all')
+            self.temp_plot_initialized = False
+
         if self.results_path:
             torch.save(self.policy.state_dict(), f'{self.results_path}/{self.config_string}.pth')
         else:
@@ -588,6 +637,26 @@ class PPOAgent:
         plt.ylabel('Average Reward')
         plt.grid()
         plt.show()
+
+    def plot_rewards_temp(self):
+        if not self.temp_plot_initialized:
+            # Initialize the plot window
+            plt.ion()  # Turn on interactive mode
+            self.fig, self.ax = plt.subplots(figsize=(12, 6))
+            self.line, = self.ax.plot([], [], label="Average Reward")
+            self.ax.set_xlabel('Update')
+            self.ax.set_ylabel('Average Reward')
+            self.ax.grid()
+            self.ax.legend()
+            self.temp_plot_initialized = True
+        
+        # Update the plot with new rewards
+        self.line.set_xdata(range(len(self.all_rewards)))
+        self.line.set_ydata(self.all_rewards)
+        self.ax.relim()  # Recalculate limits
+        self.ax.autoscale_view()  # Autoscale the view to fit the data
+        self.fig.canvas.draw()  # Redraw the canvas
+        plt.pause(0.001)  # Pause briefly to allow updates
 
     def plot_agent_positions(self):
         if not self.agent_positions:
@@ -678,7 +747,7 @@ class PPOAgent:
                 mpatches.Patch(color='blue', label='Agent'),
                 mpatches.Patch(color='brown', label='Apple Tree'),
             ]
-            ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=12)
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_title(f'Step: {step}')
@@ -721,6 +790,6 @@ if __name__ == "__main__":
     torch.set_num_threads(12)  # Number of threads for intra-op parallelism
     torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
 
-    agent = PPOAgent(num_envs=100, num_steps=128, num_updates=10, hidden_size=256,
-                     grid_size=20, view_size=7, max_hunger=100, num_trees=2, num_predators=1, results_path=None)
+    agent = PPOAgent(num_envs=100, num_steps=256, num_updates=3000, hidden_size=256,
+                     grid_size=100, view_size=7, max_hunger=100, num_trees=4, num_predators=4, results_path=None)
     agent.train()
