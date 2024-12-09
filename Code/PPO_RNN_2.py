@@ -42,15 +42,15 @@ class GridWorldEnv:
             overlap = True
             attempts = 0
             while overlap:
-                # # Randomly place the apple tree
+                # # Method 1: Randomly place the apple trees
                 # tree_x = np.random.randint(1, max_tree_start + 1)
                 # tree_y = np.random.randint(1, max_tree_start + 1)
 
-                # # Place tree in the middle
+                # # Method 2: Place tree in the middle (1 tree)
                 # tree_x = self.grid_size // 2 - 2
                 # tree_y = self.grid_size // 2 - 2
 
-                # Randomly place the apple tree close to center
+                # Mehthod 3: Randomly place the apple trees close to center
                 tree_radius = self.grid_size // 4
                 tree_x = np.random.randint(tree_radius, self.grid_size - tree_radius - 5)
                 tree_y = np.random.randint(tree_radius, self.grid_size - tree_radius - 5)
@@ -84,10 +84,10 @@ class GridWorldEnv:
         empty_cells = [cell for cell in empty_cells if tuple(cell) not in apple_tree_set]
         empty_cells = np.array(empty_cells)
 
-        # Place the agent randomly in empty cells (excluding apple tree positions)
+        # Method 1: Place the agent randomly in empty cells (excluding apple tree positions)
         # self.agent_pos = empty_cells[np.random.choice(len(empty_cells))]
 
-        # Place the agent near a random part of a random tree
+        # Method 2: Place the agent near a random part of a random tree
         random_tree = self.apple_trees[np.random.choice(len(self.apple_trees))]
         random_tree_part = random_tree[np.random.choice(len(random_tree))]
 
@@ -232,10 +232,11 @@ class GridWorldEnv:
                     # Move randomly
                     move = random.choice([(-1, 0), (1, 0), (0, -1), (0, 1)])
             else:
-                # Move randomly
+                # Predator cannot see the agent...
+                # ...Method 1: Move randomly
                 move = random.choice([(-1, 0), (1, 0), (0, -1), (0, 1)])
 
-                # Move towards the middle with 10% probability --> slightly biased towards the middle
+                # ...Method 2: Move towards the middle with 10% probability --> slightly biased towards the middle
                 # if np.random.rand() < 0.1:
                 #     delta = np.array([self.grid_size // 2, self.grid_size // 2]) - pos
                 #     move_options = []
@@ -292,16 +293,6 @@ class GridWorldEnv:
                     reward += -10
                     self.done = True
                     break
-                # elif distance_to_agent <= 3:
-                #     reward += -2*(4 - distance_to_agent)  # Negative reward for being close to a predator
-
-                # if (self.previous_predator_distance != -1):
-                #     if distance_to_agent > self.previous_predator_distance:
-                #         reward += 5
-                # if distance_to_agent > (self.view_size - 1):
-                #     self.previous_predator_distance = -1
-                # else:
-                #     self.previous_predator_distance = distance_to_agent
 
         if self.done:
             obs = self._get_observation()
