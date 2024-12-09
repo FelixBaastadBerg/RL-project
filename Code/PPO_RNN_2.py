@@ -22,6 +22,7 @@ class GridWorldEnv:
     def __init__(self, grid_size=20, view_size=5, max_hunger=100, num_predators=1, num_trees=1):
         self.grid_size = grid_size
         self.view_size = view_size
+        self.view_size_predator = 10
         self.max_hunger = max_hunger
         self.num_predators = num_predators
         self.num_trees = num_trees
@@ -215,7 +216,7 @@ class GridWorldEnv:
             # Decide movement for predator
             # Check if the agent is within 10 tiles (Manhattan distance)
             distance_to_agent = np.abs(pos - self.agent_pos).sum()
-            if distance_to_agent <= 10:
+            if distance_to_agent <= self.view_size_predator:
                 # 70% chance to move towards the agent
                 if np.random.rand() < 0.7:
                     # Move towards the agent

@@ -4,6 +4,18 @@ from PPO_RNN_2 import GridWorldEnv, PolicyValueNetwork, PPOAgent
 import matplotlib.pyplot as plt
 import os
 
+def calculate_distances(agent_positions, predator_positions):
+    """Calculate distances between agent and each predator over time."""
+    distances = []
+    for predator_trace in predator_positions:
+        distances_to_predator = [
+            np.linalg.norm(np.array(agent_pos) - np.array(predator_pos))
+            for agent_pos, predator_pos in zip(agent_positions, predator_trace)
+        ]
+        distances.append(distances_to_predator)
+    return distances
+
+
 if __name__ == "__main__":
     os.environ["OMP_NUM_THREADS"] = "12"  # Number of threads for OpenMP
     os.environ["MKL_NUM_THREADS"] = "12"  # Number of threads for Intel MKL
@@ -31,7 +43,7 @@ if __name__ == "__main__":
     # To store all attempts
     attempts = []
 
-    for attempt in range(10):  # Run 100 independent attempts
+    for attempt in range(100):  # Run 100 independent attempts
         print(f"Attempt {attempt + 1}")
         # Initialize environment and tracking
         env = agent.envs[0]  # Single environment
@@ -50,6 +62,7 @@ if __name__ == "__main__":
         done = False
         steps_survived = 0
         total_reward = 0
+        rewards_all = []
         while not done:
             with torch.no_grad():
                 policy_logits, _, (hx, cx) = agent.policy(obs, hx, cx)
@@ -73,15 +86,28 @@ if __name__ == "__main__":
 
             steps_survived += 1
             total_reward += reward
+            rewards_all.append(reward)
+            
+            
+        distances_to_predators = calculate_distances(agent.agent_positions, agent.predator_positions)
+        predator_view_size = env.view_size_predator
+        proximity_count = sum(
+            sum(distances[t] <= predator_view_size for distances in distances_to_predators)
+            for t in range(len(agent.agent_positions))
+        )
+            
+        
 
         # Store the attempt's data
         attempts.append({
             "steps_survived": steps_survived,
             "total_reward": total_reward,
+            "rewards_all": rewards_all,
             "agent_positions": agent.agent_positions,
             "apple_positions": agent.apple_positions,
             "tree_positions": env.apple_trees,
             "predator_positions": agent.predator_positions,
+            "time_in_proximity_to_predator": proximity_count,
             "env": env  # Store the environment for plotting tree positions
         })
 
@@ -90,7 +116,8 @@ if __name__ == "__main__":
     print(f"Total reward: {np.mean([a['total_reward'] for a in attempts])}")
     
     # Find the attempt with the longest survival
-    best_attempt = max(attempts, key=lambda x: x["steps_survived"])
+    best_attempt = max(attempts, key=lambda x: x["time_in_proximity_to_predator"])
+    # best_attempt = max(attempts, key=lambda x: x["steps_survived"])
     # best_attempt = max(attempts, key=lambda x: x["total_reward"])
     print("Best Attempt:")
     print(f"Longest survival: {best_attempt['steps_survived']} steps")
@@ -260,11 +287,82 @@ if __name__ == "__main__":
         plt.gca().invert_yaxis()  # Invert y-axis to match grid coordinates
         plt.legend()
         plt.grid(True)
-        plt.show()
+        # plt.show()
+
+    def plot_accumulated_reward_and_distances(best_attempt):
+        """Plot accumulated reward and distances to predators over time with proper color gradient."""
+        # Extract relevant data
+        agent_positions = np.array(best_attempt["agent_positions"])
+        predator_positions = best_attempt["predator_positions"]
+        rewards_all = best_attempt["rewards_all"]
+        view_size = best_attempt["env"].view_size
+        view_size = view_size // 2
+        view_size_predator = best_attempt["env"].view_size_predator
+
+        # Calculate accumulated reward over timesteps
+        timesteps = len(agent_positions)
+        accumulated_rewards = np.cumsum(rewards_all)
+
+        # Calculate distances to predators
+        distances_to_predators = calculate_distances(agent_positions, predator_positions)
+
+        # Generate a colormap for timesteps
+        colormap = plt.cm.viridis
+        colors = colormap(np.linspace(0, 1, timesteps))
+
+        # Plot setup
+        fig, ax1 = plt.subplots(figsize=(12, 8))
+
+        # Adjust the plot size to make room for the colorbar and legend
+        ax1.set_position([0.1, 0.25, 0.75, 0.65])  # [left, bottom, width, height]
+
+        # Plot accumulated reward with color gradient
+        for i in range(1, timesteps):
+            ax1.plot([i-1, i], [accumulated_rewards[i-1], accumulated_rewards[i]],
+                    color=colors[i], linewidth=2)
+
+        ax1.set_xlabel("Timesteps")
+        pad = timesteps // 200
+        ax1.set_xlim(-pad, timesteps + pad)
+        ax1.set_ylabel("Accumulated Reward")
+        ax1.set_title("Accumulated Reward and Distances to Predators Over Time")
+
+        # Add a second y-axis for distances
+        ax2 = ax1.twinx()
+        predator_colors = plt.cm.tab10.colors  # Use distinct colors for predators
+        for i, distances in enumerate(distances_to_predators):
+            ax2.plot(range(timesteps), distances, color=predator_colors[i], linestyle='--', linewidth=2,
+                    label=f"Distance to Predator {i + 1}")
+        # Plot view sizes
+        ax2.axhline(y=view_size, color='green', linestyle=':', label='Agent View Size')
+        ax2.axhline(y=view_size_predator, color='red', linestyle=':', label='Predator View Size')
+
+        ax2.set_ylabel("Distance to Predators")
+
+        # Add a horizontal colorbar at the bottom
+        sm = plt.cm.ScalarMappable(cmap=colormap, norm=plt.Normalize(vmin=0, vmax=timesteps))
+        sm.set_array([])  # Required for colorbar
+        cbar = fig.colorbar(sm, ax=ax1, orientation='horizontal', fraction=0.05, pad=0.05, aspect=30)
+        cbar.set_label('Timestep')
+
+        # Place the legend horizontally at the bottom
+        num_predators = len(distances_to_predators)
+        fig.legend(
+            loc="upper left",
+            bbox_to_anchor=(0.125, 0.875),  # Centered horizontally below the plot
+            # ncol=num_predators + 1,      # Arrange predator lines and reward label horizontally
+        )
+
+        # Finalize the plot
+        plt.grid(True)
+        # plt.show()
 
 
 
 
-    # Plot the best attempt with a moving average
+
+    print(best_attempt["time_in_proximity_to_predator"])
     plot_best_attempt_with_moving_average(window_size=10)
-    plot_best_attempt()
+    plot_accumulated_reward_and_distances(best_attempt)
+    plt.show()
+    # plot_best_attempt()
