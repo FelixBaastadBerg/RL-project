@@ -45,7 +45,7 @@ class GridWorldEnv:
 
         # Place predators
         self.predator_positions = []
-        num_predators = 2
+        num_predators = 0
         for _ in range(num_predators):
             if len(empty_cells) > 0:
                 predator_pos = empty_cells[np.random.choice(len(empty_cells))]
@@ -94,9 +94,6 @@ class GridWorldEnv:
                 self.apple_pos = None  # No empty cell to place an apple
         else:
             self.hunger += 1
-
-        # THIS FUCKS UP SOMETHING
-        #reward -= 0.01*self.hunger
 
         # Check if the agent dies due to hunger
         if self.hunger >= self.max_hunger:
@@ -200,15 +197,20 @@ class GridWorldEnv:
         return obs_flat  # Returns an array of length 24
 
 class PolicyValueNetwork(nn.Module):
-    def __init__(self, input_size, num_actions, hidden_size=128):
+    def __init__(self, input_size, num_actions, hidden_size=128, use_lstm=True):
         super(PolicyValueNetwork, self).__init__()
         self.hidden_size = hidden_size
+        self.use_lstm = use_lstm
 
         # First hidden layer after the input
         self.fc1 = nn.Linear(input_size, hidden_size)
 
-        # LSTM layer
-        self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True)
+        if self.use_lstm:
+            # LSTM layer
+            self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True)
+        else:
+            # Feedforward replacement for LSTM
+            self.fc2 = nn.Linear(hidden_size, hidden_size)
 
         # Actor (policy) head with two hidden layers
         self.actor_fc1 = nn.Linear(hidden_size, hidden_size)
@@ -220,13 +222,23 @@ class PolicyValueNetwork(nn.Module):
         self.critic_fc2 = nn.Linear(hidden_size, hidden_size)
         self.value_head = nn.Linear(hidden_size, 1)
 
-    def forward(self, x, hx, cx):
+    def forward(self, x, hx=None, cx=None):
         x = x.float() / 3.0  # Normalize input (max value is 3)
         x = F.relu(self.fc1(x))  # First hidden layer
 
-        x = x.unsqueeze(1)  # Add time dimension for LSTM: (batch_size, seq_len=1, hidden_size)
-        x, (hx, cx) = self.lstm(x, (hx, cx))  # LSTM layer
-        x = x.squeeze(1)  # Remove time dimension: (batch_size, hidden_size)
+        if self.use_lstm:
+            # If using LSTM, add a time dimension
+            x = x.unsqueeze(1)  # (batch_size, seq_len=1, hidden_size)
+            if hx is None or cx is None:
+                # Initialize hidden states to zeros if not provided
+                batch_size = x.size(0)
+                hx = torch.zeros(1, batch_size, self.hidden_size, device=x.device)
+                cx = torch.zeros(1, batch_size, self.hidden_size, device=x.device)
+            x, (hx, cx) = self.lstm(x, (hx, cx))  # LSTM layer
+            x = x.squeeze(1)  # Remove time dimension: (batch_size, hidden_size)
+        else:
+            # If not using LSTM, apply the second feedforward layer
+            x = F.relu(self.fc2(x))
 
         # Actor (policy) head
         actor_x = F.relu(self.actor_fc1(x))
@@ -238,13 +250,17 @@ class PolicyValueNetwork(nn.Module):
         critic_x = F.relu(self.critic_fc2(critic_x))
         value = self.value_head(critic_x)
 
-        return policy_logits, value.squeeze(-1), (hx, cx)
+        if self.use_lstm:
+            return policy_logits, value.squeeze(-1), (hx, cx)
+        else:
+            return policy_logits, value.squeeze(-1), (None, None)
 
 class PPOAgent:
-    def __init__(self, num_envs=30, num_steps=128, num_updates=200):
+    def __init__(self, num_envs=50, num_steps=128, num_updates=2000, use_lstm=True):
         self.num_envs = num_envs
         self.num_steps = num_steps
         self.num_updates = num_updates
+        self.use_lstm = use_lstm
 
         self.gamma = 0.99
         self.gae_lambda = 0.95
@@ -258,24 +274,28 @@ class PPOAgent:
         self.envs = [GridWorldEnv() for _ in range(num_envs)]
         self.input_size = 24  # 5x5 grid minus the agent's own position
         self.num_actions = 4
-        self.hidden_size = 128  # Hidden size for LSTM
+        self.hidden_size = 256  # Hidden size for LSTM
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.policy = PolicyValueNetwork(self.input_size, self.num_actions, self.hidden_size).to(self.device)
+        self.policy = PolicyValueNetwork(self.input_size, self.num_actions, self.hidden_size, use_lstm=use_lstm).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate, eps=self.eps)
 
         self.all_rewards = []
         self.agent_positions = []  # To track positions of the first agent
         self.apple_positions = []  # To track positions of the apple
 
-        # Initialize LSTM hidden states (num_layers=1)
-        self.hx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
-        self.cx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
+        if use_lstm:
+            # Initialize LSTM hidden states (num_layers=1)
+            self.hx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
+            self.cx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
+        else:
+            self.hx = self.cx = None
 
     def collect_rollouts(self, track_positions=False):
         obs_list, actions_list, log_probs_list = [], [], []
         values_list, rewards_list, dones_list = [], [], []
-        hxs_list, cxs_list = [], []
+        if self.use_lstm:
+            hxs_list, cxs_list = [], []
 
         obs = np.array([env.reset() for env in self.envs])
         obs = torch.tensor(obs, device=self.device)
@@ -287,8 +307,10 @@ class PPOAgent:
 
         for step in range(self.num_steps):
             with torch.no_grad():
-                # Pass observations and hidden states to the network
-                policy_logits, value, (hx, cx) = self.policy(obs, self.hx, self.cx)
+                if self.use_lstm:
+                    policy_logits, value, (hx, cx) = self.policy(obs, self.hx, self.cx)
+                else:
+                    policy_logits, value, _ = self.policy(obs)
                 dist = torch.distributions.Categorical(logits=policy_logits)
                 action = dist.sample()
                 log_prob = dist.log_prob(action)
@@ -298,12 +320,13 @@ class PPOAgent:
             actions_list.append(action.cpu())
             log_probs_list.append(log_prob.cpu())
             values_list.append(value.cpu())
-            hxs_list.append(self.hx.squeeze(0).cpu())
-            cxs_list.append(self.cx.squeeze(0).cpu())
 
-            # Update hidden states
-            self.hx = hx.detach()
-            self.cx = cx.detach()
+            if self.use_lstm:
+                hxs_list.append(self.hx.squeeze(0).cpu())
+                cxs_list.append(self.cx.squeeze(0).cpu())
+                # Update hidden states
+                self.hx = hx.detach()
+                self.cx = cx.detach()
 
             obs_np = []
             rewards = []
@@ -322,9 +345,10 @@ class PPOAgent:
 
                 if done:
                     ob = env.reset()
-                    # Reset hidden states for this environment
-                    self.hx[:, i, :] = torch.zeros_like(self.hx[:, i, :])
-                    self.cx[:, i, :] = torch.zeros_like(self.cx[:, i, :])
+                    if self.use_lstm:
+                        # Reset hidden states for this environment
+                        self.hx[:, i, :] = torch.zeros_like(self.hx[:, i, :])
+                        self.cx[:, i, :] = torch.zeros_like(self.cx[:, i, :])
 
                 obs_np.append(ob)
                 rewards.append(reward)
@@ -336,7 +360,10 @@ class PPOAgent:
 
         # Collect the last value estimation for GAE computation
         with torch.no_grad():
-            _, next_value, _ = self.policy(obs, self.hx, self.cx)
+            if self.use_lstm:
+                _, next_value, _ = self.policy(obs, self.hx, self.cx)
+            else:
+                _, next_value, _ = self.policy(obs)
         next_value = next_value.cpu()
 
         # Store positions if tracking
@@ -344,8 +371,12 @@ class PPOAgent:
             self.agent_positions = positions
             self.apple_positions = apple_positions
 
-        return (obs_list, actions_list, log_probs_list, values_list,
-                rewards_list, dones_list, next_value, hxs_list, cxs_list)
+        if self.use_lstm:
+            return (obs_list, actions_list, log_probs_list, values_list,
+                    rewards_list, dones_list, next_value, hxs_list, cxs_list)
+        else:
+            return (obs_list, actions_list, log_probs_list, values_list,
+                    rewards_list, dones_list, next_value)
 
     def compute_gae(self, rewards_list, values_list, dones_list, next_value):
         rewards = torch.stack(rewards_list)
@@ -367,7 +398,7 @@ class PPOAgent:
         return advantages, returns
 
     def update_policy(self, obs_batch, actions_batch, log_probs_old_batch,
-                      returns_batch, advantages_batch, hxs_batch, cxs_batch):
+                      returns_batch, advantages_batch, hxs_batch=None, cxs_batch=None):
         # Normalize advantages
         advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
 
@@ -386,8 +417,11 @@ class PPOAgent:
             old_log_probs_mb = log_probs_old_batch[mb_indices].to(self.device)
             returns_mb = returns_batch[mb_indices].to(self.device)
             advantages_mb = advantages_batch[mb_indices].to(self.device)
-            hxs_mb = hxs_batch[mb_indices].unsqueeze(0).to(self.device)  # Add num_layers dimension
-            cxs_mb = cxs_batch[mb_indices].unsqueeze(0).to(self.device)
+            if self.use_lstm:
+                hxs_mb = hxs_batch[mb_indices].unsqueeze(0).to(self.device)  # Add num_layers dimension
+                cxs_mb = cxs_batch[mb_indices].unsqueeze(0).to(self.device)
+            else:
+                hxs_mb = cxs_mb = None
 
             # Forward pass with LSTM hidden states
             policy_logits, value, _ = self.policy(obs_mb, hxs_mb, cxs_mb)
@@ -414,9 +448,13 @@ class PPOAgent:
         for update in range(self.num_updates):
             # Set track_positions=True during the last rollout
             track_positions = (update == self.num_updates - 1)
-
-            (obs_list, actions_list, log_probs_list, values_list,
-             rewards_list, dones_list, next_value, hxs_list, cxs_list) = self.collect_rollouts(track_positions=track_positions)
+            
+            if self.use_lstm:
+                (obs_list, actions_list, log_probs_list, values_list,
+                 rewards_list, dones_list, next_value, hxs_list, cxs_list) = self.collect_rollouts(track_positions=track_positions)
+            else:
+                (obs_list, actions_list, log_probs_list, values_list,
+                 rewards_list, dones_list, next_value) = self.collect_rollouts(track_positions=track_positions)
 
             advantages, returns = self.compute_gae(rewards_list, values_list, dones_list, next_value)
 
@@ -426,8 +464,12 @@ class PPOAgent:
             log_probs_old_batch = torch.stack(log_probs_list).view(-1)
             returns_batch = returns.view(-1)
             advantages_batch = advantages.view(-1)
-            hxs_batch = torch.stack(hxs_list).view(-1, self.hidden_size)
-            cxs_batch = torch.stack(cxs_list).view(-1, self.hidden_size)
+
+            if self.use_lstm:
+                hxs_batch = torch.stack(hxs_list).view(-1, self.hidden_size)
+                cxs_batch = torch.stack(cxs_list).view(-1, self.hidden_size)
+            else:
+                hxs_batch = cxs_batch = None
 
             loss = self.update_policy(obs_batch, actions_batch, log_probs_old_batch,
                                       returns_batch, advantages_batch, hxs_batch, cxs_batch)
@@ -442,7 +484,6 @@ class PPOAgent:
         print("Training completed!")
         self.plot_rewards()
         self.plot_agent_positions()  # Plot the agent's positions
-        #self.visualize_policy()      # Visualize the final policy
         # Save the trained model
         torch.save(self.policy.state_dict(), 'trained_policy.pth')
         # Run the test environment
@@ -502,25 +543,31 @@ class PPOAgent:
         policy_grid = np.full((grid_size, grid_size), -1)  # Initialize with -1 (walls)
 
         # Action mapping to directions
-        action_vectors = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0)}  # (dx, dy)
+        action_vectors = {0: (-1, 0), 1: (1, 0), 2: (0, -1), 3: (0, 1)}  # (dx, dy)
+
+        # Create a grid with walls, an apple at position (5,7), and predators at positions (10,10) and (15,15)
+        grid = np.zeros((grid_size, grid_size), dtype=np.int32)
+        grid[0, :] = grid[-1, :] = grid[:, 0] = grid[:, -1] = self.envs[0].WALL  # Walls
+        grid[5, 7] = self.envs[0].APPLE  # Apple represented by 2
+        grid[10, 10] = self.envs[0].PREDATOR  # Predator represented by 3
+        grid[15, 15] = self.envs[0].PREDATOR  # Another predator
 
         for x in range(1, grid_size - 1):
             for y in range(1, grid_size - 1):
-                # Create a default observation with empty surroundings and walls
+                # Create an observation centered at position (x, y)
                 obs_grid = np.zeros((view_size, view_size), dtype=np.int32)
 
-                # Determine the positions relative to the agent's local view
                 agent_view_x = view_size // 2
                 agent_view_y = view_size // 2
 
-                # Place walls in the observation if they are present in the global grid
                 for i in range(-agent_view_x, agent_view_x + 1):
                     for j in range(-agent_view_y, agent_view_y + 1):
                         global_x, global_y = x + i, y + j
-                        if global_x < 0 or global_x >= grid_size or global_y < 0 or global_y >= grid_size:
-                            obs_grid[agent_view_x + i, agent_view_y + j] = 1  # Wall
-                        elif global_x == 0 or global_x == grid_size - 1 or global_y == 0 or global_y == grid_size - 1:
-                            obs_grid[agent_view_x + i, agent_view_y + j] = 1  # Wall
+                        local_x, local_y = agent_view_x + i, agent_view_y + j
+                        if (0 <= global_x < grid_size) and (0 <= global_y < grid_size):
+                            obs_grid[local_x, local_y] = grid[global_x, global_y]
+                        else:
+                            obs_grid[local_x, local_y] = self.envs[0].WALL  # Wall
 
                 # Flatten the observation and remove the agent's own position
                 obs_flat = obs_grid.flatten()
@@ -532,7 +579,14 @@ class PPOAgent:
 
                 # Get the action probabilities from the policy network
                 with torch.no_grad():
-                    policy_logits, _ = self.policy(obs_tensor)
+                    if self.use_lstm:
+                        # For visualization, we don't have previous hidden states, so initialize to zeros
+                        batch_size = obs_tensor.size(0)
+                        hx = torch.zeros(1, batch_size, self.hidden_size, device=self.device)
+                        cx = torch.zeros(1, batch_size, self.hidden_size, device=self.device)
+                        policy_logits, _, _ = self.policy(obs_tensor, hx, cx)
+                    else:
+                        policy_logits, _, _ = self.policy(obs_tensor)
                     action_probs = F.softmax(policy_logits, dim=1)
                     preferred_action = torch.argmax(action_probs, dim=1).item()
 
@@ -546,16 +600,24 @@ class PPOAgent:
                 action = policy_grid[x, y]
                 if action != -1:
                     dx, dy = action_vectors[action]
-                    plt.arrow(y + 0.5, x + 0.5, dx * 0.4, dy * 0.4,
-                              head_width=0.2, head_length=0.2, fc='k', ec='k')
+                    plt.arrow(y + 0.5, x + 0.5, dy * 0.4, dx * 0.4,
+                            head_width=0.2, head_length=0.2, fc='k', ec='k')
+
+        # Plot the apple at position (5,7)
+        plt.scatter(7 + 0.5, 5 + 0.5, c='red', s=200, marker='o', label='Apple')
+
+        # Plot the predators at positions (10,10) and (15,15)
+        plt.scatter(10 + 0.5, 10 + 0.5, c='blue', s=200, marker='X', label='Predator')
+        plt.scatter(15 + 0.5, 15 + 0.5, c='blue', s=200, marker='X')
 
         plt.xlim(0, grid_size)
         plt.ylim(0, grid_size)
-        plt.title('Policy Visualization')
+        plt.title('Policy Visualization with Apple and Predators')
         plt.xlabel('Y Position')
         plt.ylabel('X Position')
         plt.gca().invert_yaxis()  # Invert y-axis to match grid coordinates
         plt.grid(True)
+        plt.legend()
         plt.show()
 
     def test_trained_model(self):
@@ -563,8 +625,11 @@ class PPOAgent:
         test_env = GridWorldEnv()
         obs = test_env.reset()
         obs = torch.tensor(obs, device=self.device).unsqueeze(0)
-        hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
-        cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+        if self.use_lstm:
+            hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+            cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+        else:
+            hx = cx = None
 
         # Load the trained model
         self.policy.load_state_dict(torch.load('trained_policy.pth'))
@@ -609,19 +674,24 @@ class PPOAgent:
             nonlocal obs, hx, cx, done, step
             if event.key == 'right' and not done:
                 with torch.no_grad():
-                    policy_logits, _, (hx, cx) = self.policy(obs, hx, cx)
+                    if self.use_lstm:
+                        policy_logits, _, (hx, cx) = self.policy(obs, hx, cx)
+                    else:
+                        policy_logits, _, _ = self.policy(obs)
                     dist = torch.distributions.Categorical(logits=policy_logits)
                     action = dist.sample()
                 ob, reward, done = test_env.step(action.item())
 
                 # Reset hidden states if done
                 if done:
-                    hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
-                    cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+                    if self.use_lstm:
+                        hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+                        cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
                     print(f"Episode ended with reward: {reward}")
                 else:
-                    hx = hx.detach()
-                    cx = cx.detach()
+                    if self.use_lstm:
+                        hx = hx.detach()
+                        cx = cx.detach()
 
                 obs = torch.tensor(ob, device=self.device).unsqueeze(0)
                 step += 1
@@ -634,5 +704,5 @@ class PPOAgent:
         plt.show()
 
 if __name__ == "__main__":
-    agent = PPOAgent()
+    agent = PPOAgent(use_lstm=True)
     agent.train()
