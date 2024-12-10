@@ -636,7 +636,7 @@ class PPOAgent:
             # Save the trained model
             torch.save(self.policy.state_dict(), self.config_string + '.pth')
             # Run the test environment
-            self.test_trained_model()
+            self.test_trained_model(self.config_string + '.pth')
 
 
     def plot_rewards(self):
@@ -717,7 +717,7 @@ class PPOAgent:
         plt.grid(True)
         plt.show()
 
-    def test_trained_model(self):
+    def test_trained_model(self, model_path="trained_policy.pth"):
         # Initialize a new environment
         test_env = GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger, num_predators=self.num_predators, num_trees=self.num_trees)
         obs = test_env.reset()
@@ -726,7 +726,7 @@ class PPOAgent:
         cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
 
         # Load the trained model
-        self.policy.load_state_dict(torch.load('trained_policy.pth'))
+        self.policy.load_state_dict(torch.load(model_path))
         self.policy.eval()
 
         fig, ax = plt.subplots(figsize=(6, 6))
