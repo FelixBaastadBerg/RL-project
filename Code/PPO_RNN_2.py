@@ -27,6 +27,7 @@ class GridWorldEnv:
         self.num_predators = num_predators
         self.num_trees = num_trees
         self.previous_predator_distance = -1
+        self.observe_hunger = True  # Whether to include hunger in the observation
         self.reset()
 
     def reset(self):
@@ -174,7 +175,13 @@ class GridWorldEnv:
         #print(tuple(self.agent_pos))
         #print(self.apple_positions)
         if tuple(self.agent_pos) in self.apple_positions:
-            reward += 2
+            if self.observe_hunger:
+                min_eating_reward = 1.0
+                max_eating_reward = 10.0
+                scaled_reward = + min_eating_reward + (max_eating_reward - min_eating_reward) / self.max_hunger * self.hunger
+                reward += scaled_reward
+            else:
+                reward += 2
             self.hunger = 0
             self.grid[self.agent_pos[0], self.agent_pos[1]] = self.APPLE_TREE
             self.apple_positions.remove(tuple(self.agent_pos))
@@ -337,6 +344,9 @@ class GridWorldEnv:
         obs_flat = obs.flatten()
         agent_idx = (self.view_size * self.view_size) // 2  # Index of the agent's position
         obs_flat = np.delete(obs_flat, agent_idx)  # Remove the agent's own position
+        if self.observe_hunger:
+            normalized_hunger = self.hunger / self.max_hunger
+            obs_flat = np.append(obs_flat, normalized_hunger)
         return obs_flat  # Returns an array of length 24
 
 
@@ -405,6 +415,8 @@ class PPOAgent:
 
         self.envs = [GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger, num_predators=self.num_predators, num_trees=self.num_trees) for _ in range(num_envs)]
         self.input_size = self.view_size * self.view_size - 1 #The square of view size around the agent, minus its position
+        if self.envs[0].observe_hunger:
+            self.input_size += 1
         self.num_actions = 4
         self.hidden_size = hidden_size  # Hidden size for LSTM
 
