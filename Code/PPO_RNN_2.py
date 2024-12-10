@@ -634,7 +634,7 @@ class PPOAgent:
             self.plot_rewards()
             # self.plot_agent_positions()  # Plot the agent's positions #NB: NEEDS TO BE FIXED
             # Save the trained model
-            torch.save(self.policy.state_dict(), 'trained_policy.pth')
+            torch.save(self.policy.state_dict(), self.config_string + '.pth')
             # Run the test environment
             self.test_trained_model()
 
