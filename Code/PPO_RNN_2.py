@@ -48,14 +48,14 @@ class GridWorldEnv:
                 # tree_x = np.random.randint(1, max_tree_start + 1)
                 # tree_y = np.random.randint(1, max_tree_start + 1)
 
-                # # Method 2: Place tree in the middle (1 tree)
-                # tree_x = self.grid_size // 2 - 2
-                # tree_y = self.grid_size // 2 - 2
+                # Method 2: Place tree in the middle (1 tree)
+                tree_x = self.grid_size // 2 - 2
+                tree_y = self.grid_size // 2 - 2
 
-                # Mehthod 3: Randomly place the apple trees close to center
-                tree_radius = self.grid_size // 5
-                tree_x = np.random.randint(tree_radius, self.grid_size - tree_radius - 5)
-                tree_y = np.random.randint(tree_radius, self.grid_size - tree_radius - 5)
+                # # Mehthod 3: Randomly place the apple trees close to center
+                # tree_radius = self.grid_size // 3
+                # tree_x = np.random.randint(tree_radius, self.grid_size - tree_radius - 5)
+                # tree_y = np.random.randint(tree_radius, self.grid_size - tree_radius - 5)
 
                 apple_tree_positions = []
                 for i in range(tree_x, tree_x + 5):
@@ -103,7 +103,7 @@ class GridWorldEnv:
 
         # Remove the agent's position from empty_cells
         empty_cells = empty_cells[~np.all(empty_cells == self.agent_pos, axis=1)]
-        predator_radius = 30
+        predator_radius = 15
 
         # Remove cells further than the predator radius from the middle from empty_cells
         middle = self.grid_size // 2
@@ -246,28 +246,28 @@ class GridWorldEnv:
                     move = random.choice([(-1, 0), (1, 0), (0, -1), (0, 1)])
             else:
                 # Predator cannot see the agent...
-                # ...Method 1: Move randomly
-                move = random.choice([(-1, 0), (1, 0), (0, -1), (0, 1)])
+                # # ...Method 1: Move randomly
+                # move = random.choice([(-1, 0), (1, 0), (0, -1), (0, 1)])
 
-                # ...Method 2: Move towards the middle with 10% probability --> slightly biased towards the middle
-                # if np.random.rand() < 0.1:
-                #     delta = np.array([self.grid_size // 2, self.grid_size // 2]) - pos
-                #     move_options = []
-                #     if delta[0] > 0:
-                #         move_options.append((1, 0))
-                #     elif delta[0] < 0:
-                #         move_options.append((-1, 0))
-                #     if delta[1] > 0:
-                #         move_options.append((0, 1))
-                #     elif delta[1] < 0:
-                #         move_options.append((0, -1))
-                #     if move_options:
-                #         move = random.choice(move_options)
-                #     else:
-                #         move = (0, 0) # Predator is in the middle
-                # else:
-                #     # Move randomly
-                #     move = random.choice([(-1, 0), (1, 0), (0, -1), (0, 1)])
+                # # ...Method 2: Move towards the middle with 10% probability --> slightly biased towards the middle
+                if np.random.rand() < 0.1:
+                    delta = np.array([self.grid_size // 2, self.grid_size // 2]) - pos
+                    move_options = []
+                    if delta[0] > 0:
+                        move_options.append((1, 0))
+                    elif delta[0] < 0:
+                        move_options.append((-1, 0))
+                    if delta[1] > 0:
+                        move_options.append((0, 1))
+                    elif delta[1] < 0:
+                        move_options.append((0, -1))
+                    if move_options:
+                        move = random.choice(move_options)
+                    else:
+                        move = (0, 0) # Predator is in the middle
+                else:
+                    # Move randomly
+                    move = random.choice([(-1, 0), (1, 0), (0, -1), (0, 1)])
 
             next_pos = pos + np.array(move)
             # Check for wall collision, other predators, and apple
@@ -351,15 +351,23 @@ class GridWorldEnv:
 
 
 class PolicyValueNetwork(nn.Module):
-    def __init__(self, input_size, num_actions, hidden_size=128):
+    def __init__(self, input_size, num_actions, hidden_size=128, use_lstm=True):
         super(PolicyValueNetwork, self).__init__()
         self.hidden_size = hidden_size
+        self.use_lstm = use_lstm
 
         # First hidden layer after the input
         self.fc1 = nn.Linear(input_size, hidden_size)
 
         # LSTM layer
-        self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True)
+        # self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True)
+        if self.use_lstm:
+            #LSTM layer
+            self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True)
+        else:
+            # Replacement feedforward layer for LSTM
+            self.fc_lstm_replacement = nn.Linear(hidden_size, hidden_size)
+            
 
         # Actor (policy) head with two hidden layers
         self.actor_fc1 = nn.Linear(hidden_size, hidden_size)
@@ -371,13 +379,22 @@ class PolicyValueNetwork(nn.Module):
         self.critic_fc2 = nn.Linear(hidden_size, hidden_size)
         self.value_head = nn.Linear(hidden_size, 1)
 
-    def forward(self, x, hx, cx):
+    def forward(self, x, hx=None, cx=None):
         x = x.float() / 5.0  # Normalize input (max value is 5)
         x = F.relu(self.fc1(x))  # First hidden layer
 
-        x = x.unsqueeze(1)  # Add time dimension for LSTM: (batch_size, seq_len=1, hidden_size)
-        x, (hx, cx) = self.lstm(x, (hx, cx))  # LSTM layer
-        x = x.squeeze(1)  # Remove time dimension: (batch_size, hidden_size)
+        # x = x.unsqueeze(1)  # Add time dimension for LSTM: (batch_size, seq_len=1, hidden_size)
+        # x, (hx, cx) = self.lstm(x, (hx, cx))  # LSTM layer
+        # x = x.squeeze(1)  # Remove time dimension: (batch_size, hidden_size)
+
+        if self.use_lstm:
+            x = x.unsqueeze(1)
+            x, (hx, cx) = self.lstm(x, (hx, cx))
+            x = x.squeeze(1)
+        else:
+            # Replacement feedforward layer
+            x = F.relu(self.fc_lstm_replacement(x))
+            hx, cx = None, None  # Placeholder for consistency
 
         # Actor (policy) head
         actor_x = F.relu(self.actor_fc1(x))
@@ -392,8 +409,8 @@ class PolicyValueNetwork(nn.Module):
         return policy_logits, value.squeeze(-1), (hx, cx)
 
 class PPOAgent:
-    def __init__(self, num_envs=100, num_steps=128, num_updates=2000, hidden_size = 128, grid_size=20, view_size=5, max_hunger=100, num_trees=1, num_predators=1, results_path=None):
-        self.config_string = f"envs_{num_envs}-steps_{num_steps}-updates_{num_updates}-hidden_{hidden_size}-grid_{grid_size}-view_{view_size}-hunger_{max_hunger}-trees_{num_trees}-predators_{num_predators}"
+    def __init__(self, num_envs=100, num_steps=128, num_updates=2000, hidden_size = 128, grid_size=20, view_size=5, max_hunger=100, num_trees=1, num_predators=1, results_path=None, use_lstm=True):
+        self.config_string = f"envs_{num_envs}-steps_{num_steps}-updates_{num_updates}-hidden_{hidden_size}-grid_{grid_size}-view_{view_size}-hunger_{max_hunger}-trees_{num_trees}-predators_{num_predators}-lstm_{use_lstm}"
 
         self.num_envs = num_envs
         self.num_steps = num_steps
@@ -403,6 +420,7 @@ class PPOAgent:
         self.max_hunger = max_hunger
         self.num_trees = num_trees
         self.num_predators = num_predators
+        self.use_lstm = use_lstm
 
         self.gamma = 0.99
         self.gae_lambda = 0.95
@@ -421,7 +439,7 @@ class PPOAgent:
         self.hidden_size = hidden_size  # Hidden size for LSTM
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.policy = PolicyValueNetwork(self.input_size, self.num_actions, self.hidden_size).to(self.device)
+        self.policy = PolicyValueNetwork(self.input_size, self.num_actions, self.hidden_size, use_lstm=self.use_lstm).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate, eps=self.eps)
 
         self.all_rewards = []
@@ -431,9 +449,15 @@ class PPOAgent:
         self.results_path = results_path
         self.temp_plot_initialized = False
 
-        # Initialize LSTM hidden states (num_layers=1)
-        self.hx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
-        self.cx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
+        # # Initialize LSTM hidden states (num_layers=1)
+        # self.hx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
+        # self.cx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
+        if self.use_lstm:
+            self.hx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
+            self.cx = torch.zeros(1, self.num_envs, self.hidden_size, device=self.device)
+        else:
+            self.hx = None
+            self.cx = None
 
     def collect_rollouts(self, track_positions=False):
         obs_list, actions_list, log_probs_list = [], [], []
@@ -450,8 +474,19 @@ class PPOAgent:
 
         for step in range(self.num_steps):
             with torch.no_grad():
-                # Pass observations and hidden states to the network
-                policy_logits, value, (hx, cx) = self.policy(obs, self.hx, self.cx)
+                # # Pass observations and hidden states to the network
+                # policy_logits, value, (hx, cx) = self.policy(obs, self.hx, self.cx)
+                if self.use_lstm:
+                    policy_logits, value, (hx, cx) = self.policy(obs, self.hx, self.cx)
+                    self.hx = hx.detach()
+                    self.cx = cx.detach()
+                    hxs_list.append(self.hx.squeeze(0).cpu())
+                    cxs_list.append(self.cx.squeeze(0).cpu())
+                else:
+                    policy_logits, value, _ = self.policy(obs) # Feedforward without LSTM
+                    hxs_list.append(None)
+                    cxs_list.append(None)
+
                 dist = torch.distributions.Categorical(logits=policy_logits)
                 action = dist.sample()
                 log_prob = dist.log_prob(action)
@@ -461,12 +496,12 @@ class PPOAgent:
             actions_list.append(action.cpu())
             log_probs_list.append(log_prob.cpu())
             values_list.append(value.cpu())
-            hxs_list.append(self.hx.squeeze(0).cpu())
-            cxs_list.append(self.cx.squeeze(0).cpu())
+            # hxs_list.append(self.hx.squeeze(0).cpu())
+            # cxs_list.append(self.cx.squeeze(0).cpu())
 
-            # Update hidden states
-            self.hx = hx.detach()
-            self.cx = cx.detach()
+            # # Update hidden states
+            # self.hx = hx.detach()
+            # self.cx = cx.detach()
 
             obs_np = []
             rewards = []
@@ -485,9 +520,10 @@ class PPOAgent:
 
                 if done:
                     ob = env.reset()
-                    # Reset hidden states for this environment
-                    self.hx[:, i, :] = torch.zeros_like(self.hx[:, i, :])
-                    self.cx[:, i, :] = torch.zeros_like(self.cx[:, i, :])
+                    if self.use_lstm:
+                        # Reset hidden states for this environment
+                        self.hx[:, i, :] = torch.zeros_like(self.hx[:, i, :])
+                        self.cx[:, i, :] = torch.zeros_like(self.cx[:, i, :])
 
                 obs_np.append(ob)
                 rewards.append(reward)
@@ -500,7 +536,11 @@ class PPOAgent:
 
         # Collect the last value estimation for GAE computation
         with torch.no_grad():
-            _, next_value, _ = self.policy(obs, self.hx, self.cx)
+            # _, next_value, _ = self.policy(obs, self.hx, self.cx)
+            if self.use_lstm:
+                _, next_value, _ = self.policy(obs, self.hx, self.cx)
+            else:
+                _, next_value, _ = self.policy(obs)
         next_value = next_value.cpu()
 
         # Store positions if tracking
@@ -550,12 +590,22 @@ class PPOAgent:
             old_log_probs_mb = log_probs_old_batch[mb_indices].to(self.device)
             returns_mb = returns_batch[mb_indices].to(self.device)
             advantages_mb = advantages_batch[mb_indices].to(self.device)
-            hxs_mb = hxs_batch[mb_indices].unsqueeze(0).to(self.device)  # Add num_layers dimension
-            cxs_mb = cxs_batch[mb_indices].unsqueeze(0).to(self.device)
             old_values_mb = old_values_batch[mb_indices].to(self.device)
+            # hxs_mb = hxs_batch[mb_indices].unsqueeze(0).to(self.device)  # Add num_layers dimension
+            # cxs_mb = cxs_batch[mb_indices].unsqueeze(0).to(self.device)
+            if self.use_lstm:
+                hxs_mb = hxs_batch[mb_indices].unsqueeze(0).to(self.device)
+                cxs_mb = cxs_batch[mb_indices].unsqueeze(0).to(self.device)
+                policy_logits, value, _ = self.policy(obs_mb, hxs_mb, cxs_mb)
+            else:
+                hxs_mb = None
+                cxs_mb = None
+                policy_logits, value, _ = self.policy(obs_mb)
 
-            # Forward pass with LSTM hidden states
-            policy_logits, value, _ = self.policy(obs_mb, hxs_mb, cxs_mb)
+
+            # # Forward pass with LSTM hidden states
+            # policy_logits, value, _ = self.policy(obs_mb, hxs_mb, cxs_mb)
+
             dist = torch.distributions.Categorical(logits=policy_logits)
             entropy = dist.entropy().mean()
             new_log_probs = dist.log_prob(actions_mb)
@@ -598,9 +648,15 @@ class PPOAgent:
             log_probs_old_batch = torch.stack(log_probs_list).view(-1)
             returns_batch = returns.view(-1)
             advantages_batch = advantages.view(-1)
-            hxs_batch = torch.stack(hxs_list).view(-1, self.hidden_size)
-            cxs_batch = torch.stack(cxs_list).view(-1, self.hidden_size)
             old_values_batch = torch.stack(values_list).view(-1)  # Flatten old values
+            # hxs_batch = torch.stack(hxs_list).view(-1, self.hidden_size)
+            # cxs_batch = torch.stack(cxs_list).view(-1, self.hidden_size)
+            if self.use_lstm:
+                hxs_batch = torch.stack(hxs_list).view(-1, self.hidden_size)
+                cxs_batch = torch.stack(cxs_list).view(-1, self.hidden_size)
+            else:
+                hxs_batch = None
+                cxs_batch = None
 
             # Ensure old_values are detached from the computation graph
             old_values_batch = old_values_batch.detach()
@@ -722,8 +778,14 @@ class PPOAgent:
         test_env = GridWorldEnv(grid_size=self.grid_size, view_size=self.view_size, max_hunger=self.max_hunger, num_predators=self.num_predators, num_trees=self.num_trees)
         obs = test_env.reset()
         obs = torch.tensor(obs, device=self.device).unsqueeze(0)
-        hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
-        cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+        # hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+        # cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+        if self.use_lstm:
+            hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+            cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+        else:
+            hx = None
+            cx = None
 
         # Load the trained model
         self.policy.load_state_dict(torch.load(model_path))
@@ -770,18 +832,29 @@ class PPOAgent:
             nonlocal obs, hx, cx, done, step
             if event.key == 'right' and not done:
                 with torch.no_grad():
-                    policy_logits, _, (hx, cx) = self.policy(obs, hx, cx)
+                    # policy_logits, _, (hx, cx) = self.policy(obs, hx, cx)
+                    if self.use_lstm:
+                        policy_logits, _, (hx, cx) = self.policy(obs, hx, cx)
+                    else:
+                        policy_logits, _, _ = self.policy(obs)
+
                     dist = torch.distributions.Categorical(logits=policy_logits)
                     action = dist.sample()
                 ob, reward, done = test_env.step(action.item())
                 # Reset hidden states if done
                 if done:
-                    hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
-                    cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+                    # hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+                    # cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+                    if self.use_lstm:
+                        hx = torch.zeros(1, 1, self.hidden_size, device=self.device)
+                        cx = torch.zeros(1, 1, self.hidden_size, device=self.device)
                     print(f"Episode ended with reward: {reward}")
                 else:
-                    hx = hx.detach()
-                    cx = cx.detach()
+                    # hx = hx.detach()
+                    # cx = cx.detach()
+                    if self.use_lstm:
+                        hx = hx.detach()
+                        cx = cx.detach()
                 obs = torch.tensor(ob, device=self.device).unsqueeze(0)
                 step += 1
                 update_plot()
@@ -799,6 +872,6 @@ if __name__ == "__main__":
     torch.set_num_threads(12)  # Number of threads for intra-op parallelism
     torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
 
-    agent = PPOAgent(num_envs=100, num_steps=256, num_updates=3000, hidden_size=256,
-                     grid_size=120, view_size=7, max_hunger=100, num_trees=8, num_predators=8, results_path=None)
+    agent = PPOAgent(num_envs=100, num_steps=256, num_updates=5000, hidden_size=256,
+                     grid_size=100, view_size=7, max_hunger=100, num_trees=1, num_predators=1, results_path=None, use_lstm=False)
     agent.train()
