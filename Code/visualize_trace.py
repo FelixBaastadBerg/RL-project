@@ -3,6 +3,7 @@ import numpy as np
 from PPO_RNN_2 import GridWorldEnv, PolicyValueNetwork, PPOAgent
 import matplotlib.pyplot as plt
 import os
+import pickle
 
 def calculate_distances(agent_positions, predator_positions):
     """Calculate distances between agent and each predator over time."""
@@ -15,6 +16,48 @@ def calculate_distances(agent_positions, predator_positions):
         distances.append(distances_to_predator)
     return distances
 
+def calculate_distance_to_trees(agent_positions, tree_positions):
+    """
+    Calculate the shortest Manhattan distance between the agent and apple trees over time.
+
+    Args:
+        agent_positions (list): List of agent positions [(x, y), ...] at each timestep.
+        tree_positions (list): List of apple tree positions [(x, y), ...].
+
+    Returns:
+        list: Shortest Manhattan distance to any tree at each timestep.
+    """
+    distances = []
+    for agent_pos in agent_positions:
+        # Compute Manhattan distance to all apple trees
+        min_distance = min(
+            abs(agent_pos[0] - tree[0]) + abs(agent_pos[1] - tree[1])
+            for tree in tree_positions
+        )
+        distances.append(min_distance)
+    return distances
+
+def calculate_time_without_tree(tree_in_proximity):
+    """
+    Calculate the number of consecutive timesteps without seeing a tree.
+
+    Args:
+        tree_in_proximity (list): Boolean list indicating if a tree is in proximity.
+
+    Returns:
+        list: List of integers representing time since last tree was seen.
+    """
+    time_without_tree = []
+    counter = 0
+
+    for is_tree_near in tree_in_proximity:
+        if is_tree_near:
+            counter = 0  # Reset the counter when a tree is seen
+        else:
+            counter += 1  # Increment the counter if no tree is seen
+        time_without_tree.append(counter)
+    
+    return time_without_tree
 
 if __name__ == "__main__":
     os.environ["OMP_NUM_THREADS"] = "12"  # Number of threads for OpenMP
@@ -24,20 +67,30 @@ if __name__ == "__main__":
     torch.set_num_threads(12)  # Number of threads for intra-op parallelism
     torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
     # Initialize the PPOAgent with the same settings as the training
+    use_LSTM = True
     agent = PPOAgent(
         num_envs=1,             # Single environment for easier tracking
         num_steps=100,          # Not relevant for testing, just required for initialization
         num_updates=1,          # Not relevant for testing
         hidden_size=256,        # Hidden layer size
-        grid_size=120,           # Grid size
+        grid_size=100,           # Grid size
         view_size=7,            # Agent view size
-        max_hunger=200,         # Hunger limit
-        num_trees=8,            # Number of apple trees
-        num_predators=8         # Number of predators
+        max_hunger=100,         # Hunger limit
+        num_trees=1,            # Number of apple trees
+        num_predators=1,         # Number of predators
+        use_lstm=use_LSTM,               
     )
 
     # Load the trained policy
-    agent.policy.load_state_dict(torch.load("trained_policy.pth"))
+    if use_LSTM:
+        agent.policy.load_state_dict(torch.load("envs_100-steps_256-updates_2000-hidden_256-grid_100-view_7-hunger_100-trees_1-predators_1-lstm_True.pth"))
+        # agent.policy.load_state_dict(torch.load("envs_100-steps_256-updates_2000-hidden_256-grid_100-view_7-hunger_100-trees_1-predators_1-lstm_True-noHunger.pth"))
+        # agent.policy.load_state_dict(torch.load("trained_policy_LSTM.pth"))
+    else:
+        # agent.policy.load_state_dict(torch.load("trained_policy_noLSTM.pth"))
+        agent.policy.load_state_dict(torch.load("envs_100-steps_256-updates_2000-hidden_256-grid_100-view_7-hunger_100-trees_1-predators_1-lstm_False.pth"))
+    
+
     agent.policy.eval()
 
     # To store all attempts
@@ -50,11 +103,18 @@ if __name__ == "__main__":
         env.reset()
         agent.agent_positions = []  # To track the agent's positions
         agent.apple_positions = []  # To track apple positions over time
+        agent.tree_in_proximity = []  # To track if tree is in proximity
+        agent.tree_in_proximity_count = 0  # To track if tree is in proximity
         agent.predator_positions = [[] for _ in range(env.num_predators)]  # To track each predator's positions
 
-        # Initialize the hidden states for LSTM
-        hx = torch.zeros(1, 1, agent.hidden_size, device=agent.device)
-        cx = torch.zeros(1, 1, agent.hidden_size, device=agent.device)
+
+        if use_LSTM:
+            # Initialize the hidden states for LSTM
+            hx = torch.zeros(1, 1, agent.hidden_size, device=agent.device)
+            cx = torch.zeros(1, 1, agent.hidden_size, device=agent.device)
+        else:
+            hx = None
+            cx = None
 
         obs = torch.tensor(env._get_observation(), device=agent.device).unsqueeze(0)  # Initial observation
 
@@ -65,13 +125,26 @@ if __name__ == "__main__":
         rewards_all = []
         while not done:
             with torch.no_grad():
-                policy_logits, _, (hx, cx) = agent.policy(obs, hx, cx)
+                # policy_logits, _, (hx, cx) = agent.policy(obs, hx, cx)
+                if use_LSTM:
+                    policy_logits, _, (hx, cx) = agent.policy(obs, hx, cx)
+                else:
+                    policy_logits, _, _ = agent.policy(obs)
+
                 dist = torch.distributions.Categorical(logits=policy_logits)
                 action = dist.sample()
 
             # Perform the action in the environment
             obs_np, reward, done = env.step(action.item())
             obs = torch.tensor(obs_np, device=agent.device).unsqueeze(0)
+            APPLE_TREE = env.APPLE_TREE
+            APPLE = env.APPLE
+            if (APPLE_TREE in obs or APPLE in obs):
+                agent.tree_in_proximity.append(True)
+                agent.tree_in_proximity_count += 1
+            else:
+                agent.tree_in_proximity.append(False)
+            
 
             # Track positions
             agent.agent_positions.append(tuple(env.agent_pos))
@@ -95,8 +168,10 @@ if __name__ == "__main__":
             sum(distances[t] <= predator_view_size for distances in distances_to_predators)
             for t in range(len(agent.agent_positions))
         )
-            
-        
+
+        # print(f"Percentage of time in proximity to predator: {proximity_count / steps_survived:.2%}")
+        # print(f"Percentage of time in proximity to tree: {agent.tree_in_proximity_count / steps_survived:.2%}")
+        time_without_tree = calculate_time_without_tree(agent.tree_in_proximity)
 
         # Store the attempt's data
         attempts.append({
@@ -108,20 +183,35 @@ if __name__ == "__main__":
             "tree_positions": env.apple_trees,
             "predator_positions": agent.predator_positions,
             "time_in_proximity_to_predator": proximity_count,
+            "time_without_tree": time_without_tree,
             "env": env  # Store the environment for plotting tree positions
         })
 
-    print("Average Attempt:")
-    print(f"Survival: {np.mean([a['steps_survived'] for a in attempts])} steps")
-    print(f"Total reward: {np.mean([a['total_reward'] for a in attempts])}")
-    
     # Find the attempt with the longest survival
-    best_attempt = max(attempts, key=lambda x: x["time_in_proximity_to_predator"])
-    # best_attempt = max(attempts, key=lambda x: x["steps_survived"])
+    # best_attempt = max(attempts, key=lambda x: x["time_in_proximity_to_predator"])
+    best_attempt = max(attempts, key=lambda x: x["steps_survived"])
     # best_attempt = max(attempts, key=lambda x: x["total_reward"])
-    print("Best Attempt:")
-    print(f"Longest survival: {best_attempt['steps_survived']} steps")
-    print(f"Total reward: {best_attempt['total_reward']}")
+
+    print("Steps survived:")
+    print(f"    - Max: {best_attempt['steps_survived']}")
+    print(f"    - Average: {np.mean([a['steps_survived'] for a in attempts])}")
+    print(f"    - Variance: {np.var([a['steps_survived'] for a in attempts])}")
+    print(f"    - Standard deviation: {np.std([a['steps_survived'] for a in attempts])}")
+
+    print("Total rewards:")
+    print(f"    - Max: {best_attempt['total_reward']}")
+    print(f"    - Average: {np.mean([a['total_reward'] for a in attempts])}")
+    print(f"    - Variance: {np.var([a['total_reward'] for a in attempts])}")
+    print(f"    - Standard deviation: {np.std([a['total_reward'] for a in attempts])}")
+
+    save_path = "best_run_data.pkl"
+    best_attempt_serializable = best_attempt.copy()
+    best_attempt_serializable.pop("env")
+    with open(save_path, "wb") as f:
+        pickle.dump(best_attempt_serializable, f)
+
+    print(f"Best attempt data saved to {save_path}")
+
 
     # Plot the best attempt
     def plot_best_attempt():
@@ -294,17 +384,20 @@ if __name__ == "__main__":
         # Extract relevant data
         agent_positions = np.array(best_attempt["agent_positions"])
         predator_positions = best_attempt["predator_positions"]
+        distances_to_predators = calculate_distances(agent_positions, predator_positions)
+        trees = best_attempt["tree_positions"]
+        tree_positions = [pos for tree in trees for pos in tree]
+        distances_to_trees = calculate_distance_to_trees(agent_positions, tree_positions)
         rewards_all = best_attempt["rewards_all"]
         view_size = best_attempt["env"].view_size
         view_size = view_size // 2
+        view_size = view_size*2 # Since we are using Manhattan distance, so the corners are view_size*2 away
         view_size_predator = best_attempt["env"].view_size_predator
 
         # Calculate accumulated reward over timesteps
         timesteps = len(agent_positions)
         accumulated_rewards = np.cumsum(rewards_all)
 
-        # Calculate distances to predators
-        distances_to_predators = calculate_distances(agent_positions, predator_positions)
 
         # Generate a colormap for timesteps
         colormap = plt.cm.viridis
@@ -320,24 +413,35 @@ if __name__ == "__main__":
         for i in range(1, timesteps):
             ax1.plot([i-1, i], [accumulated_rewards[i-1], accumulated_rewards[i]],
                     color=colors[i], linewidth=2)
+        # Add legend to the color gradient
+        ax1.plot([], [], color='black', linewidth=2, label='Accumulated Reward')
+        
 
         ax1.set_xlabel("Timesteps")
         pad = timesteps // 200
         ax1.set_xlim(-pad, timesteps + pad)
         ax1.set_ylabel("Accumulated Reward")
-        ax1.set_title("Accumulated Reward and Distances to Predators Over Time")
+        # ax1.set_title("Accumulated Reward and Distances to Predators Over Time")
+        ax1.set_title("Accumulated Reward and Time Without Tree Over Time")
 
         # Add a second y-axis for distances
         ax2 = ax1.twinx()
         predator_colors = plt.cm.tab10.colors  # Use distinct colors for predators
         for i, distances in enumerate(distances_to_predators):
-            ax2.plot(range(timesteps), distances, color=predator_colors[i], linestyle='--', linewidth=2,
+            ax2.plot(range(timesteps), distances, color=predator_colors[i], linewidth=1,
                     label=f"Distance to Predator {i + 1}")
+        # # Plot distance to trees
+        # ax2.plot(range(timesteps), distances_to_trees, color='brown', linewidth=1, label="Distance to Trees")
+        # Plot time without tree
+        time_without_tree = best_attempt["time_without_tree"]
+        ax2.plot(range(timesteps), time_without_tree, color='purple', linewidth=1, label="Time Without Tree")
         # Plot view sizes
-        ax2.axhline(y=view_size, color='green', linestyle=':', label='Agent View Size')
-        ax2.axhline(y=view_size_predator, color='red', linestyle=':', label='Predator View Size')
+        ax2.axhline(y=view_size, color='green', label='Agent View Size')
+        ax2.axhline(y=view_size_predator, color='red', label='Predator View Size')
 
-        ax2.set_ylabel("Distance to Predators")
+        # ax2.set_ylabel("Manhattan Distance")
+        ax2.set_ylabel("Time since last tree seen")
+
 
         # Add a horizontal colorbar at the bottom
         sm = plt.cm.ScalarMappable(cmap=colormap, norm=plt.Normalize(vmin=0, vmax=timesteps))
@@ -358,10 +462,7 @@ if __name__ == "__main__":
         # plt.show()
 
 
-
-
-
-    print(best_attempt["time_in_proximity_to_predator"])
+    print("Proximity Count: ", best_attempt["time_in_proximity_to_predator"])
     plot_best_attempt_with_moving_average(window_size=10)
     plot_accumulated_reward_and_distances(best_attempt)
     plt.show()

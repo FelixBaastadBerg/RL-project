@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 import matplotlib.patches as mpatches
 import os
+from torch.optim.lr_scheduler import StepLR
+
 
 class GridWorldEnv:
     EMPTY = 0
@@ -410,7 +412,8 @@ class PolicyValueNetwork(nn.Module):
 
 class PPOAgent:
     def __init__(self, num_envs=100, num_steps=128, num_updates=2000, hidden_size = 128, grid_size=20, view_size=5, max_hunger=100, num_trees=1, num_predators=1, results_path=None, use_lstm=True):
-        self.config_string = f"envs_{num_envs}-steps_{num_steps}-updates_{num_updates}-hidden_{hidden_size}-grid_{grid_size}-view_{view_size}-hunger_{max_hunger}-trees_{num_trees}-predators_{num_predators}-lstm_{use_lstm}"
+        # self.config_string = f"envs_{num_envs}-steps_{num_steps}-updates_{num_updates}-hidden_{hidden_size}-grid_{grid_size}-view_{view_size}-hunger_{max_hunger}-trees_{num_trees}-predators_{num_predators}-lstm_{use_lstm}"
+        self.config_string = f"envs_{num_envs}-steps_{num_steps}-updates_{num_updates}-hidden_{hidden_size}-grid_{grid_size}-view_{view_size}-hunger_{max_hunger}-trees_{num_trees}-predators_{num_predators}-lstm_{use_lstm}-lr_decay"
 
         self.num_envs = num_envs
         self.num_steps = num_steps
@@ -441,6 +444,8 @@ class PPOAgent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.policy = PolicyValueNetwork(self.input_size, self.num_actions, self.hidden_size, use_lstm=self.use_lstm).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=self.learning_rate, eps=self.eps)
+        self.scheduler = StepLR(self.optimizer, step_size=100, gamma=0.6)
+
 
         self.all_rewards = []
         self.agent_positions = []  # To track positions of the first agent
@@ -676,10 +681,13 @@ class PPOAgent:
                 print(f'Update {update}, Loss: {loss:.4f}, Avg Reward: {avg_reward:.2f}')
                 print(f"Actor Loss: {actor_loss.item()}, Value Loss: {value_loss.item()}, Entropy: {entropy.item()}")
 
+            if update > 1000:
+                self.scheduler.step()
+
             if update % 100 == 0 and update > 0:
                 self.plot_rewards_temp()
                 torch.save(self.policy.state_dict(), 'trained_policy_temp.pth')
-
+                print(f"Learning rate: {self.scheduler.get_last_lr()[0]}")
 
         print("Training completed!")
         if self.temp_plot_initialized:
