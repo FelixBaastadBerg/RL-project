@@ -478,14 +478,8 @@ class PPOAgent:
                 # policy_logits, value, (hx, cx) = self.policy(obs, self.hx, self.cx)
                 if self.use_lstm:
                     policy_logits, value, (hx, cx) = self.policy(obs, self.hx, self.cx)
-                    self.hx = hx.detach()
-                    self.cx = cx.detach()
-                    hxs_list.append(self.hx.squeeze(0).cpu())
-                    cxs_list.append(self.cx.squeeze(0).cpu())
                 else:
                     policy_logits, value, _ = self.policy(obs) # Feedforward without LSTM
-                    hxs_list.append(None)
-                    cxs_list.append(None)
 
                 dist = torch.distributions.Categorical(logits=policy_logits)
                 action = dist.sample()
@@ -502,6 +496,15 @@ class PPOAgent:
             # # Update hidden states
             # self.hx = hx.detach()
             # self.cx = cx.detach()
+            if self.use_lstm:
+                hxs_list.append(self.hx.squeeze(0).cpu())
+                cxs_list.append(self.cx.squeeze(0).cpu())
+                self.hx = hx.detach()
+                self.cx = cx.detach()
+            else:
+                hxs_list.append(None)
+                cxs_list.append(None)
+
 
             obs_np = []
             rewards = []
@@ -872,6 +875,6 @@ if __name__ == "__main__":
     torch.set_num_threads(12)  # Number of threads for intra-op parallelism
     torch.set_num_interop_threads(12)  # Number of threads for inter-op parallelism
 
-    agent = PPOAgent(num_envs=100, num_steps=256, num_updates=5000, hidden_size=256,
-                     grid_size=100, view_size=7, max_hunger=100, num_trees=1, num_predators=1, results_path=None, use_lstm=False)
+    agent = PPOAgent(num_envs=100, num_steps=256, num_updates=2000, hidden_size=256,
+                     grid_size=100, view_size=7, max_hunger=100, num_trees=1, num_predators=1, results_path=None, use_lstm=True)
     agent.train()
