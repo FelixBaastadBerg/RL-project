@@ -1,7 +1,7 @@
 import torch
 import numpy as np
-from Code.PPO_RNN_Experiment_1 import GridWorldEnv
-from Code.PPO_RNN_Experiment_2 import PPOAgent
+from PPO_RNN_Experiment_1 import GridWorldEnv
+from PPO_RNN_Experiment_2 import PPOAgent
 from rich.progress import track
 
 def test_agent_longest_run(agent, num_tests=100):
