@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-import PPO_RNN_2 as PPO_RNN
+import Code.PPO_RNN_Experiment_2 as PPO_RNN
 import numpy as np
 
 

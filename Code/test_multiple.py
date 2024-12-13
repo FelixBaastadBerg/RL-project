@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from PPO_RNN import PPOAgent, GridWorldEnv, PolicyValueNetwork
+from Code.PPO_RNN_Experiment_1 import PPOAgent, GridWorldEnv, PolicyValueNetwork
 
 def test_policy(policy_path, num_episodes=100):
     """

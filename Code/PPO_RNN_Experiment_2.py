@@ -189,24 +189,6 @@ class GridWorldEnv:
             self.apple_positions.remove(tuple(self.agent_pos))
         else: 
             self.hunger += 1
-        """
-        if self.apple_pos is not None and np.array_equal(self.agent_pos, self.apple_pos):
-            reward = 1  # Reward for eating an apple
-            self.hunger = 0  # Reset hunger
-            self.grid[self.apple_pos[0], self.apple_pos[1]] = self.APPLE_TREE  # Reset to apple tree tile
-
-            # Place a new apple within the apple tree
-            occupied_positions = [tuple(self.agent_pos)] + [tuple(pos) for pos in self.predator_positions]
-            # available_apple_positions = [pos for pos in self.apple_tree_positions if pos not in occupied_positions]
-            available_apple_positions = [pos for tree in self.apple_trees for pos in tree if pos not in occupied_positions]
-            if available_apple_positions:
-                self.apple_pos = available_apple_positions[np.random.choice(len(available_apple_positions))]
-                self.grid[self.apple_pos[0], self.apple_pos[1]] = self.APPLE
-            else:
-                self.apple_pos = None  # No available position in the apple tree
-        else:
-            self.hunger += 1
-        """
 
         # Check if the agent dies due to hunger
         if self.hunger >= self.max_hunger:

@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from PPO_RNN_2 import GridWorldEnv, PolicyValueNetwork, PPOAgent
+from PPO_RNN_Experiment_2 import GridWorldEnv, PolicyValueNetwork, PPOAgent
 import matplotlib.pyplot as plt
 import os
 import pickle
@@ -83,9 +83,9 @@ if __name__ == "__main__":
 
     # Load the trained policy
     if use_LSTM:
-        agent.policy.load_state_dict(torch.load("envs_100-steps_256-updates_2000-hidden_256-grid_100-view_7-hunger_100-trees_1-predators_1-lstm_True.pth"))
+        agent.policy.load_state_dict(torch.load("Results/envs_100-steps_256-updates_2000-hidden_256-grid_100-view_7-hunger_100-trees_1-predators_1-lstm_True.pth"))
     else:
-        agent.policy.load_state_dict(torch.load("envs_100-steps_256-updates_2000-hidden_256-grid_100-view_7-hunger_100-trees_1-predators_1-lstm_False.pth"))
+        agent.policy.load_state_dict(torch.load("Results/envs_100-steps_256-updates_2000-hidden_256-grid_100-view_7-hunger_100-trees_1-predators_1-lstm_False.pth"))
     
 
     agent.policy.eval()

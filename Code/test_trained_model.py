@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 import matplotlib.patches as mpatches
 
-from PPO_RNN_2 import GridWorldEnv, PolicyValueNetwork, PPOAgent
+from Code.PPO_RNN_Experiment_2 import GridWorldEnv, PolicyValueNetwork, PPOAgent
 
 if __name__ == "__main__":
     agent = PPOAgent(num_envs=100, num_steps=128, num_updates=3000, hidden_size=256,
