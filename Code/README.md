@@ -15,9 +15,6 @@ This repository contains the complete codebase for training, testing, and visual
 
 ## Project Structure
 
-### Code Directory
-The `Code` folder is the main directory and is structured as follows:
-
 #### **Core Scripts**
 - **PPO_RNN_Experiment_1.py**:  
    Runs the first experiment using the PPO-RNN model.
