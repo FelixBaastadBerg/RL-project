@@ -84,10 +84,7 @@ if __name__ == "__main__":
     # Load the trained policy
     if use_LSTM:
         agent.policy.load_state_dict(torch.load("envs_100-steps_256-updates_2000-hidden_256-grid_100-view_7-hunger_100-trees_1-predators_1-lstm_True.pth"))
-        # agent.policy.load_state_dict(torch.load("envs_100-steps_256-updates_2000-hidden_256-grid_100-view_7-hunger_100-trees_1-predators_1-lstm_True-noHunger.pth"))
-        # agent.policy.load_state_dict(torch.load("trained_policy_LSTM.pth"))
     else:
-        # agent.policy.load_state_dict(torch.load("trained_policy_noLSTM.pth"))
         agent.policy.load_state_dict(torch.load("envs_100-steps_256-updates_2000-hidden_256-grid_100-view_7-hunger_100-trees_1-predators_1-lstm_False.pth"))
     
 
@@ -96,7 +93,7 @@ if __name__ == "__main__":
     # To store all attempts
     attempts = []
 
-    for attempt in range(10):  # Run 100 independent attempts
+    for attempt in range(1000):  # Run 1000 independent attempts
         print(f"Attempt {attempt + 1}")
         # Initialize environment and tracking
         env = agent.envs[0]  # Single environment
@@ -212,82 +209,12 @@ if __name__ == "__main__":
 
     print(f"Best attempt data saved to {save_path}")
 
+    # # Load the saved best run data
+    # load_path = "best_run_data_noLSTM.pkl"
 
-    # Plot the best attempt
-    def plot_best_attempt():
-        env = best_attempt["env"]
-        agent_positions = np.array(best_attempt["agent_positions"])
-        apple_positions = best_attempt["apple_positions"]
-        tree_positions = best_attempt["tree_positions"]
-        predator_positions = best_attempt["predator_positions"]
+    # with open(load_path, "rb") as f:
+    #     best_attempt = pickle.load(f)
 
-        plt.figure(figsize=(8, 8))
-
-        # Plot apple tree positions first
-        apple_tree_positions = np.array([pos for tree in tree_positions for pos in tree])
-        if len(apple_tree_positions) > 0:
-            plt.scatter(
-                apple_tree_positions[:, 1],
-                apple_tree_positions[:, 0],
-                color='brown',
-                marker='s',
-                label='Apple Tree'
-            )
-
-        # Plot apple positions on top of trees
-        apple_positions_filtered = [pos for pos in apple_positions if pos is not None]
-        if apple_positions_filtered:
-            flat_apple_positions = []
-            for item in apple_positions_filtered:
-                if isinstance(item, list):
-                    flat_apple_positions.extend(item)
-                elif isinstance(item, tuple):
-                    flat_apple_positions.append(item)
-            apple_positions_array = np.array(flat_apple_positions)
-            apple_x_positions = apple_positions_array[:, 1]
-            apple_y_positions = apple_positions_array[:, 0]
-            plt.scatter(
-                apple_x_positions,
-                apple_y_positions,
-                color='orange',
-                marker='x',
-                label='Apples'
-            )
-
-        # Plot predator positions
-        for i, predator_trace in enumerate(predator_positions):
-            predator_trace = np.array(predator_trace)
-            plt.plot(
-                predator_trace[:, 1],
-                predator_trace[:, 0],
-                '--',
-                label=f'Predator {i + 1}',
-                alpha=0.7
-            )
-
-        # Plot agent positions
-        x_positions = agent_positions[:, 1]
-        y_positions = agent_positions[:, 0]
-        plt.scatter(
-            x_positions,
-            y_positions,
-            c=range(len(x_positions)),
-            cmap='viridis',
-            marker='o',
-            label='Agent'
-        )
-
-        # Finalize plot
-        plt.colorbar(label='Timestep')
-        plt.title('Best Attempt: Agent, Predator, and Apple Movement')
-        plt.xlabel('X Position')
-        plt.ylabel('Y Position')
-        plt.xlim(0, env.grid_size)
-        plt.ylim(0, env.grid_size)
-        plt.gca().invert_yaxis()  # Invert y-axis to match grid coordinates
-        plt.legend()
-        plt.grid(True)
-        plt.show()
 
     def moving_average(data, window_size):
         """Calculate the moving average for a list of 2D positions."""
@@ -351,8 +278,9 @@ if __name__ == "__main__":
                 predator_trace_smoothed[:, 1],
                 predator_trace_smoothed[:, 0],
                 '--',
-                label=f'Predator {i + 1}',
-                alpha=0.7
+                label=f'Predator',
+                alpha=0.5,
+                color=(242/255, 0, 1)
             )
 
         # Plot smoothed agent positions
@@ -374,6 +302,8 @@ if __name__ == "__main__":
         plt.ylabel('Y Position')
         plt.xlim(0, env.grid_size)
         plt.ylim(0, env.grid_size)
+        # plt.xlim(0, 100)
+        # plt.ylim(0, 100)
         plt.gca().invert_yaxis()  # Invert y-axis to match grid coordinates
         plt.legend()
         plt.grid(True)
@@ -390,9 +320,11 @@ if __name__ == "__main__":
         distances_to_trees = calculate_distance_to_trees(agent_positions, tree_positions)
         rewards_all = best_attempt["rewards_all"]
         view_size = best_attempt["env"].view_size
+        # view_size = 7
         view_size = view_size // 2
         view_size = view_size*2 # Since we are using Manhattan distance, so the corners are view_size*2 away
         view_size_predator = best_attempt["env"].view_size_predator
+        # view_size_predator = 10
 
         # Calculate accumulated reward over timesteps
         timesteps = len(agent_positions)
@@ -426,21 +358,23 @@ if __name__ == "__main__":
 
         # Add a second y-axis for distances
         ax2 = ax1.twinx()
-        predator_colors = plt.cm.tab10.colors  # Use distinct colors for predators
-        for i, distances in enumerate(distances_to_predators):
-            ax2.plot(range(timesteps), distances, color=predator_colors[i], linewidth=1,
-                    label=f"Distance to Predator {i + 1}")
+        # predator_colors = plt.cm.tab10.colors  # Use distinct colors for predators
+        # for i, distances in enumerate(distances_to_predators):
+        #     ax2.plot(range(timesteps), distances, color=predator_colors[i], linewidth=1,
+        #             label=f"Distance to Predator {i + 1}")
         # # Plot distance to trees
         # ax2.plot(range(timesteps), distances_to_trees, color='brown', linewidth=1, label="Distance to Trees")
         # Plot time without tree
         time_without_tree = best_attempt["time_without_tree"]
         ax2.plot(range(timesteps), time_without_tree, color='purple', linewidth=1, label="Time Without Tree")
         # Plot view sizes
-        ax2.axhline(y=view_size, color='green', label='Agent View Size')
-        ax2.axhline(y=view_size_predator, color='red', label='Predator View Size')
+        # ax2.axhline(y=view_size, color='green', label='Agent View Size')
+        # ax2.axhline(y=view_size_predator, color='red', label='Predator View Size')
 
         # ax2.set_ylabel("Manhattan Distance")
         ax2.set_ylabel("Time since last tree seen")
+        eps = 0.05
+        ax2.set_ylim(-eps, max(time_without_tree) + 1)
 
 
         # Add a horizontal colorbar at the bottom
@@ -466,4 +400,3 @@ if __name__ == "__main__":
     plot_best_attempt_with_moving_average(window_size=10)
     plot_accumulated_reward_and_distances(best_attempt)
     plt.show()
-    # plot_best_attempt()

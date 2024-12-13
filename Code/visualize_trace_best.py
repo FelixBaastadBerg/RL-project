@@ -4,16 +4,16 @@ import matplotlib.patches as patches
 import numpy as np
 
 # Load the saved best run data
-load_path = "best_run_data.pkl"
+load_path = "best_run_data_lstm.pkl"
 
 with open(load_path, "rb") as f:
     best_attempt = pickle.load(f)
 
 # Input variables for time range
-time_start = 3920  # Start time
-length = 60        # Total length of the trace
+time_start = 1015  # Start time
+length = 75        # Total length of the trace
 time_end = min(time_start + length, len(best_attempt["agent_positions"]))
-mv_avg_window = 5  # Window size for moving average
+mv_avg_window = 10  # Window size for moving average
 
 # Extract relevant data for plotting
 agent_positions = np.array(best_attempt["agent_positions"])[time_start:time_end]
@@ -67,15 +67,17 @@ def plot_trace(ax, agent_positions, predator_positions, tree_positions, time_ran
     # Plot agent positions
     for i, (x, y) in enumerate(agent_positions[start - time_start:end - time_start]):
         ax.scatter(
-            y, x, color=(0, 0, 1, opacity_values[i]), s=50, label='Agent' if i == 0 else None
-        )
+            y, x, color=(0, 0, 1, opacity_values[i]), s=50, 
+            label='Agent' if i == len(agent_positions[start - time_start:end - time_start]) - 1 else None
 
+        )
+    # hex = 242, 0, 255
     # Plot predator positions
     for predator_idx, predator_trace in enumerate(predator_positions):
         for i, (x, y) in enumerate(predator_trace[start - time_start:end - time_start]):
             ax.scatter(
-                y, x, color=(1, 0, 0, opacity_values[i]), s=50, 
-                label=f'Predator' if i == 0 else None
+                y, x, color=(242/255, 0, 1, opacity_values[i]), s=50, 
+                label=f'Predator' if i == len(predator_trace[start - time_start:end - time_start]) - 1 else None
             )
 
     # Plot formatting
@@ -84,14 +86,17 @@ def plot_trace(ax, agent_positions, predator_positions, tree_positions, time_ran
     ax.set_ylabel("Y Position")
     ax.set_xlim(33, 55)
     ax.set_ylim(43, 65)
+    ax.set_xticks(np.arange(30, 60 + 1, 5))  # X-axis ticks from 30 to 60 in steps of 5
+    ax.set_yticks(np.arange(40, 70 + 1, 5))  # Y-axis ticks from 40 to 70 in steps of 5
+
     ax.invert_yaxis()  # Align grid axes
     ax.legend()
 
 # Generate opacity values
-opacity_values = calculate_opacity(length//3)
+opacity_values = calculate_opacity(length//3 + 1)
 
 # Plot the three time ranges
-fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+fig, axes = plt.subplots(1, 3, figsize=(14.2, 5))
 
 for ax, time_range in zip(axes, time_ranges):
     plot_trace(ax, agent_positions, predator_positions, tree_positions, time_range, opacity_values)

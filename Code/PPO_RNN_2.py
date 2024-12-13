@@ -180,7 +180,7 @@ class GridWorldEnv:
             if self.observe_hunger:
                 min_eating_reward = 1.0
                 max_eating_reward = 10.0
-                scaled_reward = + min_eating_reward + (max_eating_reward - min_eating_reward) / self.max_hunger * self.hunger
+                scaled_reward = min_eating_reward + (max_eating_reward - min_eating_reward) / self.max_hunger * self.hunger
                 reward += scaled_reward
             else:
                 reward += 2
